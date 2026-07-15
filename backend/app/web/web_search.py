@@ -61,7 +61,7 @@ class WebSearcher:
                 query=query,
                 search_depth="basic",
                 max_results=max_results,
-                time_range="week"  # 搜索最近一周的结果，保证时效性
+                auto_parameters=True  # 自动根据查询意图设置 time_range 等参数
             )
 
             results = []
