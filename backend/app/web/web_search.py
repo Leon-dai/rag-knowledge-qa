@@ -49,7 +49,7 @@ class WebSearcher:
                 self._ddg_search = False
         return self._ddg_search if self._ddg_search is not False else None
 
-    def search_tavily(self, query: str, max_results: int = 10) -> List[WebSearchResult]:
+    def search_tavily(self, query: str, max_results: int = 12) -> List[WebSearchResult]:
         """使用 Tavily 搜索"""
         client = self._get_tavily_client()
         if not client:
@@ -79,7 +79,7 @@ class WebSearcher:
             logger.error(f"Tavily 搜索失败: {e}")
             return []
 
-    def search_duckduckgo(self, query: str, max_results: int = 5) -> List[WebSearchResult]:
+    def search_duckduckgo(self, query: str, max_results: int = 12) -> List[WebSearchResult]:
         """使用 DuckDuckGo 搜索"""
         ddgs = self._get_ddg_search()
         if not ddgs:
@@ -105,7 +105,7 @@ class WebSearcher:
             logger.error(f"DuckDuckGo 搜索失败: {e}")
             return []
 
-    def search(self, query: str, max_results: int = 5, use_tavily: bool = True) -> List[WebSearchResult]:
+    def search(self, query: str, max_results: int = 12, use_tavily: bool = True) -> List[WebSearchResult]:
         """
         联网搜索（支持降级）
 
@@ -146,7 +146,7 @@ def get_web_searcher() -> WebSearcher:
     return _web_searcher
 
 
-def web_search(query: str, max_results: int = 5) -> List[WebSearchResult]:
+def web_search(query: str, max_results: int = 12) -> List[WebSearchResult]:
     """
     联网搜索便捷函数
 

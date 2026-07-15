@@ -271,7 +271,7 @@ class RAGService:
             yield await emit_status("正在搜索互联网...")
             from app.web import web_search
             # 用原始问题搜索互联网
-            web_results = web_search(question, max_results=10)
+            web_results = web_search(question, max_results=12)
             if web_results:
                 logger.info(f"联网搜索成功: {len(web_results)} 条结果")
             else:
