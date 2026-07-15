@@ -29,6 +29,12 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
   const [pinnedIds, setPinnedIds] = useState<string[]>([])
 
   const handleCreate = async () => {
+    // 如果已有空对话，直接切过去，不重复创建
+    const existingEmpty = sessions.find(s => s.message_count === 0)
+    if (existingEmpty) {
+      navigate(`/chat/${existingEmpty.id}`)
+      return
+    }
     await createSession()
     const { currentSession } = useChatStore.getState()
     if (currentSession) {
@@ -89,10 +95,10 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
     },
   ]
 
-  // 置顶的会话
-  const pinnedSessions = sessions.filter(s => pinnedIds.includes(s.id))
-  // 未置顶的会话
-  const unpinnedSessions = sessions.filter(s => !pinnedIds.includes(s.id))
+  // 置顶的会话（排除空对话）
+  const pinnedSessions = sessions.filter(s => pinnedIds.includes(s.id) && s.message_count > 0)
+  // 未置顶的会话（排除空对话）
+  const unpinnedSessions = sessions.filter(s => !pinnedIds.includes(s.id) && s.message_count > 0)
 
   // 按时间分组（未置顶的）
   const groupedSessions = {

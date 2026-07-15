@@ -59,10 +59,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const res = await chatAPI.createSession()
     const session = res.data
     set((state) => ({
-      sessions: [session, ...state.sessions],
+      // 清理旧空对话，只保留有内容的
+      sessions: [session, ...state.sessions.filter(s => s.message_count > 0)],
       currentSession: session,
       messages: [],
-      loading: false,  // 新会话不需要加载状态
+      loading: false,
     }))
   },
 
