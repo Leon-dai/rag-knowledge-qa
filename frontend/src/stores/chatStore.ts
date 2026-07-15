@@ -62,6 +62,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       sessions: [session, ...state.sessions],
       currentSession: session,
       messages: [],
+      loading: false,  // 新会话不需要加载状态
     }))
   },
 
@@ -71,7 +72,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   fetchMessages: async (sessionId: string) => {
-    set({ loading: true })
+    // 只在消息为空时（首次加载）显示骨架屏，切换会话时静默加载
+    const { messages } = get()
+    if (messages.length === 0) {
+      set({ loading: true })
+    }
     try {
       const res = await chatAPI.getMessages(sessionId)
       set({ messages: res.data.items || [] })
