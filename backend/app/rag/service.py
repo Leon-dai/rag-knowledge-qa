@@ -4,6 +4,7 @@ from typing import AsyncGenerator
 
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from app.config import settings
 from app.model_settings import get_current_llm_model
@@ -16,6 +17,7 @@ from app.rag.prompts import (
     CHAT_PROMPT_TEMPLATE,
 )
 from app.rag.streaming import stream_response, format_citations, emit_status
+from app.logging import logger
 
 
 class RAGService:
@@ -89,6 +91,29 @@ class RAGService:
         if enable_thinking:
             kwargs["model_kwargs"] = {"extra_body": {"enable_thinking": True}}
         return ChatOpenAI(**kwargs)
+
+    @staticmethod
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((Exception,)),
+        reraise=True,
+    )
+    async def _invoke_llm_with_retry(llm, prompt: str):
+        """带重试的 LLM 调用"""
+        return await llm.ainvoke(prompt)
+
+    @staticmethod
+    async def _astream_llm_with_retry(llm, prompt: str) -> AsyncGenerator:
+        """带错误处理的流式 LLM 调用"""
+        try:
+            generator = llm.astream(prompt)
+            async for chunk in generator:
+                yield chunk
+        except Exception as e:
+            logger.error(f"流式生成失败: {e}")
+            # 发送错误事件给前端
+            yield await emit_status(f"生成回答时出错，请重试: {str(e)}")
 
     @staticmethod
     def _build_context(search_results) -> str:
@@ -262,9 +287,9 @@ class RAGService:
                 question=question,
             )
 
-        # 4. 流式生成
+        # 4. 流式生成（带错误处理）
         llm = RAGService._get_llm(streaming=True)
-        generator = llm.astream(prompt_text)
+        generator = RAGService._astream_llm_with_retry(llm, prompt_text)
 
         async for sse_event in stream_response(generator, citations):
             yield sse_event
@@ -295,5 +320,10 @@ class RAGService:
                 question=question,
             )
 
-        response = llm.invoke(prompt)
-        return {"answer": response.content, "citations": citations}
+        # 带重试的 LLM 调用
+        try:
+            response = await RAGService._invoke_llm_with_retry(llm, prompt)
+            return {"answer": response.content, "citations": citations}
+        except Exception as e:
+            logger.error(f"非流式问答失败: {e}")
+            return {"answer": "生成回答时出错，请重试", "citations": []}
