@@ -1,8 +1,9 @@
-import { Button, List, Typography, Popconfirm, Tooltip } from 'antd'
-import { PlusOutlined, DeleteOutlined, MenuFoldOutlined } from '@ant-design/icons'
+import { Button, List, Typography, Popconfirm, Tooltip, Dropdown, Avatar } from 'antd'
+import { PlusOutlined, DeleteOutlined, MenuFoldOutlined, UserOutlined, LogoutOutlined, KeyOutlined, SettingOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useChatStore } from '../../stores/chatStore'
 import { useAuthStore } from '../../stores/authStore'
+import type { MenuProps } from 'antd'
 import dayjs from 'dayjs'
 
 const { Text } = Typography
@@ -16,7 +17,7 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
   const navigate = useNavigate()
   const { sessionId } = useParams<{ sessionId: string }>()
   const { sessions, createSession, deleteSession } = useChatStore()
-  const { user } = useAuthStore()
+  const { user, logout } = useAuthStore()
 
   const handleCreate = async () => {
     await createSession()
@@ -32,6 +33,42 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
       navigate('/chat')
     }
   }
+
+  const handleLogout = () => {
+    logout()
+    navigate('/login')
+  }
+
+  const userMenuItems: MenuProps['items'] = [
+    {
+      key: 'role',
+      label: <Text type="secondary">{user?.role === 'admin' ? '管理员' : '普通用户'}</Text>,
+      disabled: true,
+    },
+    { type: 'divider' },
+    {
+      key: 'changePassword',
+      icon: <KeyOutlined />,
+      label: '修改密码',
+      onClick: () => navigate('/profile/change-password'),
+    },
+    ...(user?.role === 'admin'
+      ? [{
+          key: 'admin',
+          icon: <SettingOutlined />,
+          label: '管理后台',
+          onClick: () => navigate('/admin'),
+        }]
+      : []),
+    { type: 'divider' },
+    {
+      key: 'logout',
+      icon: <LogoutOutlined />,
+      label: '退出登录',
+      onClick: handleLogout,
+      danger: true,
+    },
+  ]
 
   // 按时间分组
   const groupedSessions = {
@@ -50,7 +87,7 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
-      transition: 'all 0.3s ease',
+      transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
     }}>
       {/* Logo 区域 */}
       <div style={{
@@ -59,22 +96,29 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
+        height: 60,
+        flexShrink: 0,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden' }}>
           <div style={{
             width: 28,
             height: 28,
-            background: '#1677ff',
+            background: 'linear-gradient(135deg, #1677ff 0%, #0958d9 100%)',
             borderRadius: 6,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             color: '#fff',
-            fontSize: 16,
+            fontSize: 14,
+            flexShrink: 0,
           }}>
-
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+              <path d="M2 17l10 5 10-5"/>
+              <path d="M2 12l10 5 10-5"/>
+            </svg>
           </div>
-          <Text strong style={{ fontSize: 16, color: '#1677ff' }}>AI 搜索</Text>
+          <Text strong style={{ fontSize: 16, color: '#1677ff', whiteSpace: 'nowrap' }}>AI 搜索</Text>
         </div>
         <Tooltip title="折叠侧边栏">
           <Button
@@ -82,12 +126,13 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
             size="small"
             icon={<MenuFoldOutlined />}
             onClick={onToggle}
+            style={{ flexShrink: 0 }}
           />
         </Tooltip>
       </div>
 
       {/* 新建对话按钮 */}
-      <div style={{ padding: '12px 16px' }}>
+      <div style={{ padding: '12px 16px', flexShrink: 0 }}>
         <Button
           type="dashed"
           icon={<PlusOutlined />}
@@ -127,30 +172,26 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
         )}
       </div>
 
-      {/* 底部用户信息 */}
+      {/* 底部用户信息 - 可点击 */}
       {user && (
-        <div style={{
-          padding: '12px 16px',
-          borderTop: '1px solid #f0f0f0',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-        }}>
+        <Dropdown menu={{ items: userMenuItems }} placement="topRight">
           <div style={{
-            width: 28,
-            height: 28,
-            borderRadius: '50%',
-            background: '#1677ff',
+            padding: '12px 16px',
+            borderTop: '1px solid #f0f0f0',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            color: '#fff',
-            fontSize: 12,
-          }}>
-            {user.username?.charAt(0).toUpperCase()}
+            gap: 8,
+            cursor: 'pointer',
+            transition: 'background 0.2s',
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.background = '#f0f0f0'}
+          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+          >
+            <Avatar size="small" icon={<UserOutlined />} style={{ background: '#1677ff' }} />
+            <Text style={{ fontSize: 13 }}>{user.username}</Text>
           </div>
-          <Text style={{ fontSize: 13 }}>{user.username}</Text>
-        </div>
+        </Dropdown>
       )}
     </div>
   )
