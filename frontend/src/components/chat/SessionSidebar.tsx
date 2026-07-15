@@ -187,7 +187,7 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
         <Dropdown
           menu={{
             items: userMenuItems,
-            style: { width: 160 },
+            style: { width: 160, marginLeft: 8 },
           }}
           placement="topLeft"
           trigger={['click']}
