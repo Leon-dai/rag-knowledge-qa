@@ -1,6 +1,6 @@
-import { useEffect } from 'react'
-import { Button, List, Typography, Popconfirm, Tooltip, Dropdown, Avatar } from 'antd'
-import { PlusOutlined, DeleteOutlined, MenuFoldOutlined, UserOutlined, LogoutOutlined, KeyOutlined, SettingOutlined } from '@ant-design/icons'
+import { useEffect, useState } from 'react'
+import { Button, Typography, Tooltip, Dropdown, Avatar, Input, message } from 'antd'
+import { PlusOutlined, MenuFoldOutlined, UserOutlined, LogoutOutlined, KeyOutlined, SettingOutlined, MoreOutlined, PushpinOutlined, ShareAltOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useChatStore } from '../../stores/chatStore'
 import { useAuthStore } from '../../stores/authStore'
@@ -17,7 +17,7 @@ interface Props {
 export default function SessionSidebar({ collapsed, onToggle }: Props) {
   const navigate = useNavigate()
   const { sessionId } = useParams<{ sessionId: string }>()
-  const { sessions, createSession, deleteSession } = useChatStore()
+  const { sessions, createSession, deleteSession, renameSession } = useChatStore()
   const { user, logout, fetchMe } = useAuthStore()
 
   // 确保用户信息已加载
@@ -38,6 +38,10 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
     if (sessionId === id) {
       navigate('/chat')
     }
+  }
+
+  const handleRename = async (id: string, newTitle: string) => {
+    await renameSession(id, newTitle)
   }
 
   const handleLogout = () => {
@@ -159,25 +163,25 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
         {groupedSessions.today.length > 0 && (
           <>
             <Text type="secondary" style={{ fontSize: 11, padding: '8px 8px 4px', display: 'block' }}>今天</Text>
-            <SessionList sessions={groupedSessions.today} onDelete={handleDelete} onNavigate={navigate} sessionId={sessionId} />
+            <SessionList sessions={groupedSessions.today} onDelete={handleDelete} onRename={handleRename} onNavigate={navigate} sessionId={sessionId} />
           </>
         )}
         {groupedSessions.yesterday.length > 0 && (
           <>
             <Text type="secondary" style={{ fontSize: 11, padding: '8px 8px 4px', display: 'block' }}>昨天</Text>
-            <SessionList sessions={groupedSessions.yesterday} onDelete={handleDelete} onNavigate={navigate} sessionId={sessionId} />
+            <SessionList sessions={groupedSessions.yesterday} onDelete={handleDelete} onRename={handleRename} onNavigate={navigate} sessionId={sessionId} />
           </>
         )}
         {groupedSessions.week.length > 0 && (
           <>
             <Text type="secondary" style={{ fontSize: 11, padding: '8px 8px 4px', display: 'block' }}>7 天内</Text>
-            <SessionList sessions={groupedSessions.week} onDelete={handleDelete} onNavigate={navigate} sessionId={sessionId} />
+            <SessionList sessions={groupedSessions.week} onDelete={handleDelete} onRename={handleRename} onNavigate={navigate} sessionId={sessionId} />
           </>
         )}
         {groupedSessions.month.length > 0 && (
           <>
             <Text type="secondary" style={{ fontSize: 11, padding: '8px 8px 4px', display: 'block' }}>30 天内</Text>
-            <SessionList sessions={groupedSessions.month} onDelete={handleDelete} onNavigate={navigate} sessionId={sessionId} />
+            <SessionList sessions={groupedSessions.month} onDelete={handleDelete} onRename={handleRename} onNavigate={navigate} sessionId={sessionId} />
           </>
         )}
       </div>
@@ -215,74 +219,106 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
 }
 
 // 会话列表组件
-function SessionList({ sessions, onDelete, onNavigate, sessionId }: {
+function SessionList({ sessions, onDelete, onNavigate, onRename, sessionId }: {
   sessions: any[]
   onDelete: (id: string) => void
   onNavigate: (path: string) => void
+  onRename: (id: string, newTitle: string) => void
   sessionId: string | undefined
 }) {
+  const [hoveredId, setHoveredId] = useState<string | null>(null)
+
   return (
-    <List
-      dataSource={sessions}
-      renderItem={(session) => (
-        <List.Item
-          onClick={() => onNavigate(`/chat/${session.id}`)}
-          style={{
-            cursor: 'pointer',
-            padding: '10px 12px',
-            marginBottom: 4,
-            borderRadius: 8,
-            background: sessionId === session.id ? '#e6f4ff' : 'transparent',
-            borderLeft: sessionId === session.id ? '3px solid #1677ff' : '3px solid transparent',
-            transition: 'all 0.2s',
-          }}
-          onMouseEnter={(e) => {
-            if (sessionId !== session.id) {
-              e.currentTarget.style.background = '#f5f5f5'
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (sessionId !== session.id) {
-              e.currentTarget.style.background = 'transparent'
-            }
-          }}
-        >
-          <div style={{ width: '100%', overflow: 'hidden' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text
-                strong
-                ellipsis={{ tooltip: session.title }}
-                style={{ maxWidth: 180, fontSize: 13 }}
-              >
-                {session.title}
-              </Text>
-              <Popconfirm
-                title="确定删除此对话？"
-                onConfirm={(e) => {
-                  e?.stopPropagation()
-                  onDelete(session.id)
-                }}
-                onCancel={(e) => e?.stopPropagation()}
-              >
-                <Button
-                  type="text"
-                  size="small"
-                  danger
-                  icon={<DeleteOutlined />}
-                  onClick={(e) => e.stopPropagation()}
-                  style={{ opacity: 0.6 }}
-                />
-              </Popconfirm>
-            </div>
-            <Text type="secondary" style={{ fontSize: 11 }}>
-              {dayjs(session.updated_at).format('MM-DD HH:mm')}
-              {' · '}
-              {session.message_count} 条消息
+    <div>
+      {sessions.map((session) => {
+        const isSelected = sessionId === session.id
+        const isHovered = hoveredId === session.id
+
+        const menuItems: MenuProps['items'] = [
+          {
+            key: 'rename',
+            icon: <EditOutlined />,
+            label: '重命名',
+            onClick: () => {
+              const newTitle = prompt('输入新标题:', session.title)
+              if (newTitle && newTitle.trim()) {
+                onRename(session.id, newTitle.trim())
+              }
+            },
+          },
+          {
+            key: 'share',
+            icon: <ShareAltOutlined />,
+            label: '分享',
+            onClick: () => {
+              message.info('分享功能开发中...')
+            },
+          },
+          { type: 'divider' },
+          {
+            key: 'delete',
+            icon: <DeleteOutlined />,
+            label: '删除',
+            danger: true,
+            onClick: () => onDelete(session.id),
+          },
+        ]
+
+        return (
+          <div
+            key={session.id}
+            onClick={() => onNavigate(`/chat/${session.id}`)}
+            onMouseEnter={() => setHoveredId(session.id)}
+            onMouseLeave={() => setHoveredId(null)}
+            style={{
+              padding: '10px 12px',
+              marginBottom: 2,
+              borderRadius: 8,
+              background: isSelected ? '#e6f4ff' : (isHovered ? '#f5f5f5' : 'transparent'),
+              cursor: 'pointer',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              transition: 'background 0.2s',
+            }}
+          >
+            <Text
+              ellipsis={{ tooltip: session.title }}
+              style={{
+                flex: 1,
+                fontSize: 13,
+                color: isSelected ? '#1677ff' : undefined,
+              }}
+            >
+              {session.title}
             </Text>
+
+            {/* 悬停时显示图标 */}
+            {isHovered && (
+              <div style={{ display: 'flex', gap: 4, marginLeft: 8, flexShrink: 0 }}>
+                <Tooltip title="置顶">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<PushpinOutlined />}
+                    style={{ fontSize: 12, padding: 0, width: 20, height: 20 }}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </Tooltip>
+                <Dropdown menu={{ items: menuItems }} trigger={['click']}>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<MoreOutlined />}
+                    style={{ fontSize: 14, padding: 0, width: 20, height: 20 }}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </Dropdown>
+              </div>
+            )}
           </div>
-        </List.Item>
-      )}
-      locale={{ emptyText: null }}
-    />
+        )
+      })}
+    </div>
   )
 }
