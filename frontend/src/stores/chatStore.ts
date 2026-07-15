@@ -30,7 +30,7 @@ interface ChatState {
   createSession: () => Promise<void>
   selectSession: (sessionId: string) => void
   fetchMessages: (sessionId: string) => Promise<void>
-  sendMessage: (sessionId: string, content: string) => Promise<void>
+  sendMessage: (sessionId: string, content: string, searchMode?: 'local' | 'web' | 'mixed') => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
   renameSession: (sessionId: string, title: string) => Promise<void>
 }
@@ -82,7 +82,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  sendMessage: async (sessionId: string, content: string) => {
+  sendMessage: async (sessionId: string, content: string, searchMode: 'local' | 'web' | 'mixed' = 'local') => {
     // 中断上一个流
     if (abortController) {
       abortController.abort()
@@ -129,7 +129,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, search_mode: searchMode }),
         signal: abortController.signal,
       })
 

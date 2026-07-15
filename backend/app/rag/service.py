@@ -116,15 +116,26 @@ class RAGService:
             yield await emit_status(f"生成回答时出错，请重试: {str(e)}")
 
     @staticmethod
-    def _build_context(search_results) -> str:
-        if not search_results:
-            return "暂无相关产品资料"
+    def _build_context(search_results, include_web_results: list = None) -> str:
+        """构建上下文，支持本地文档和联网结果"""
         parts = []
-        for i, (doc, _score) in enumerate(search_results, 1):
-            source = doc.metadata.get("doc_title", "未知来源")
-            page = doc.metadata.get("page", "")
-            page_info = f" (第{page}页)" if page else ""
-            parts.append(f"[资料{i} | 来源: {source}{page_info}]\n{doc.page_content}")
+
+        # 本地文档
+        if search_results:
+            for i, (doc, _score) in enumerate(search_results, 1):
+                source = doc.metadata.get("doc_title", "未知来源")
+                page = doc.metadata.get("page", "")
+                page_info = f" (第{page}页)" if page else ""
+                parts.append(f"[本地资料{i} | 来源: {source}{page_info}]\n{doc.page_content}")
+
+        # 联网结果
+        if include_web_results:
+            for i, web_result in enumerate(include_web_results, 1):
+                parts.append(f"[网络资料{i} | 来源: {web_result.title} ({web_result.url})]\n{web_result.content}")
+
+        if not parts:
+            return "暂无相关资料"
+
         return "\n\n---\n\n".join(parts)
 
     @staticmethod
@@ -200,14 +211,17 @@ class RAGService:
     async def query(
         question: str,
         chat_history: list[dict] | None = None,
+        search_mode: str = "local",  # "local", "web", "mixed"
     ) -> AsyncGenerator[str, None]:
-        """RAG 问答主流程：混合检索 → Reranker精排 → 流式生成
+        """RAG 问答主流程：支持本地/联网/混合搜索
 
         检索链路:
-        1. 混合检索（向量 + BM25 → RRF融合）→ 召回 8 条候选
-        2. Reranker Cross-Encoder 精排 → 保留 top-3
-        3. Reranker 分数判断 → RAG模式 or Chat模式
-        4. LLM 流式生成 → SSE 推送
+        1. 根据 search_mode 决定搜索范围
+        2. 本地搜索：混合检索（向量 + BM25 → RRF融合）
+        3. 联网搜索：Tavily/DuckDuckGo
+        4. Reranker Cross-Encoder 精排 → 保留 top-3
+        5. Reranker 分数判断 → RAG模式 or Chat模式
+        6. LLM 流式生成 → SSE 推送
 
         Yields:
             SSE 格式字符串
@@ -228,47 +242,88 @@ class RAGService:
         from app.rag.query_rewriter import smart_rewrite_query
         rewritten_queries = smart_rewrite_query(question, chat_history)
 
-        # 2. 混合检索（向量 + BM25 → 加权 RRF）→ 召回候选
-        yield await emit_status(f"正在检索知识库... (策略: {strategy['description']})")
+        # 2. 根据 search_mode 执行搜索
+        local_candidates = []
+        web_results = []
 
-        # 用分解后的多个子问题分别检索，合并去重
-        all_candidates = {}  # doc_key -> (doc, score)
-        for q in rewritten_queries[:5]:  # 最多5个子问题
-            results = hybrid_search(
-                q,
-                top_k=6,
-                vector_weight=vector_weight,
-                bm25_weight=bm25_weight,
-            )
-            for doc, score in results:
-                doc_key = f"{doc.metadata.get('doc_title', '')}:{doc.metadata.get('chunk_index', 0)}"
-                if doc_key not in all_candidates:
-                    all_candidates[doc_key] = (doc, score)
+        # 本地搜索
+        if search_mode in ["local", "mixed"]:
+            yield await emit_status(f"正在检索本地知识库... (策略: {strategy['description']})")
 
-        candidates = list(all_candidates.values())[:8]  # 最多8条
+            # 用分解后的多个子问题分别检索，合并去重
+            all_candidates = {}  # doc_key -> (doc, score)
+            for q in rewritten_queries[:5]:  # 最多5个子问题
+                results = hybrid_search(
+                    q,
+                    top_k=6,
+                    vector_weight=vector_weight,
+                    bm25_weight=bm25_weight,
+                )
+                for doc, score in results:
+                    doc_key = f"{doc.metadata.get('doc_title', '')}:{doc.metadata.get('chunk_index', 0)}"
+                    if doc_key not in all_candidates:
+                        all_candidates[doc_key] = (doc, score)
 
-        if not candidates:
-            yield await emit_status("知识库为空，切换为通用对话...")
+            local_candidates = list(all_candidates.values())[:8]  # 最多8条
 
-        # 2. LLM-as-Judge：判断哪些候选文档真正与问题相关
-        if candidates:
-            yield await emit_status(f"检索到 {len(candidates)} 篇候选，AI 正在判断相关性...")
-            relevant = RAGService._judge_relevance(question, candidates)
+        # 联网搜索
+        if search_mode in ["web", "mixed"]:
+            yield await emit_status("正在搜索互联网...")
+            from app.web import web_search
+            # 用原始问题搜索互联网
+            web_results = web_search(question, max_results=5)
+            if web_results:
+                logger.info(f"联网搜索成功: {len(web_results)} 条结果")
+            else:
+                logger.warning("联网搜索无结果或失败")
+
+        # 3. 合并结果
+        all_docs = local_candidates
+        if not all_docs and not web_results:
+            yield await emit_status("未找到相关内容，切换为通用对话...")
+
+        # 4. LLM-as-Judge：判断哪些本地文档真正与问题相关
+        if local_candidates:
+            yield await emit_status(f"本地检索到 {len(local_candidates)} 篇候选，AI 正在判断相关性...")
+            relevant = RAGService._judge_relevance(question, local_candidates)
         else:
             relevant = []
 
-        # 3. 根据 Judge 结果选择模式
-        if relevant:
+        # 5. 根据结果选择模式
+        if relevant or web_results:
             # === RAG 模式：有相关文档 ===
-            reranked = rerank(question, [doc for doc, _ in relevant], top_k=3)
+            reranked = rerank(question, [doc for doc, _ in relevant], top_k=3) if relevant else []
 
             # 扩展子块为父块（Small-to-Big）
             # 参考: All-in-RAG C8 — Parent Document Retriever
-            expanded_docs = RAGService._expand_to_parent_docs([doc for doc, _ in reranked])
+            expanded_docs = RAGService._expand_to_parent_docs([doc for doc, _ in reranked]) if reranked else []
 
-            yield await emit_status(f"找到 {len(expanded_docs)} 篇相关文档，正在生成回答...")
-            citations = format_citations(reranked)  # 引用仍用子块（更精确）
-            context = RAGService._build_context([(doc, 0) for doc in expanded_docs])
+            # 构建状态信息
+            status_parts = []
+            if expanded_docs:
+                status_parts.append(f"找到 {len(expanded_docs)} 篇本地文档")
+            if web_results:
+                status_parts.append(f"{len(web_results)} 条网络资料")
+
+            yield await emit_status(f"{', '.join(status_parts)}，正在生成回答...")
+
+            # 构建引用（区分本地和网络）
+            citations = format_citations(reranked) if reranked else []
+            # 添加网络引用
+            for i, web_result in enumerate(web_results, 1):
+                citations.append({
+                    "source": f"🌐 {web_result.title}",
+                    "doc_id": f"web_{i}",
+                    "pages": None,
+                    "url": web_result.url,
+                })
+
+            # 构建上下文
+            context = RAGService._build_context(
+                [(doc, 0) for doc in expanded_docs],
+                include_web_results=web_results
+            )
+
             system_prompt = RAG_SYSTEM_PROMPT.format(current_date=today)
             prompt_text = RAG_PROMPT_TEMPLATE.format(
                 system_prompt=system_prompt,
@@ -278,7 +333,7 @@ class RAGService:
             )
         else:
             # === Chat 模式：无相关文档 ===
-            yield await emit_status("知识库中无相关内容，AI 自由回答...")
+            yield await emit_status("未找到相关内容，AI 自由回答...")
             citations = []
             system_prompt = CHAT_SYSTEM_PROMPT.format(current_date=today)
             prompt_text = CHAT_PROMPT_TEMPLATE.format(
@@ -287,7 +342,7 @@ class RAGService:
                 question=question,
             )
 
-        # 4. 流式生成（带错误处理）
+        # 6. 流式生成（带错误处理）
         llm = RAGService._get_llm(streaming=True)
         generator = RAGService._astream_llm_with_retry(llm, prompt_text)
 

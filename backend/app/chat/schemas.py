@@ -36,6 +36,10 @@ class SessionListResponse(BaseModel):
 class SendMessageRequest(BaseModel):
     """发送消息请求"""
     content: str = Field(..., min_length=1, max_length=5000, description="消息内容")
+    search_mode: str = Field(
+        default="local",
+        description="搜索模式: 'local' (本地知识库), 'web' (仅联网), 'mixed' (混合搜索)"
+    )
 
 
 class MessageResponse(BaseModel):

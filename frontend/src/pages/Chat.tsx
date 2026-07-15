@@ -1,17 +1,19 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
-import { Input, Button, Spin, Empty, Typography, message, Skeleton } from 'antd'
-import { SendOutlined, PlusOutlined } from '@ant-design/icons'
+import { Input, Button, Spin, Empty, Typography, message, Skeleton, Select, Tooltip } from 'antd'
+import { SendOutlined, PlusOutlined, GlobalOutlined, DatabaseOutlined, MergeCellsOutlined } from '@ant-design/icons'
 import { useChatStore } from '../stores/chatStore'
 import SessionSidebar from '../components/chat/SessionSidebar'
 import MessageBubble from '../components/chat/MessageBubble'
 
 const { Text } = Typography
+const { Option } = Select
 
 export default function Chat() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const [inputValue, setInputValue] = useState('')
   const [sending, setSending] = useState(false)
+  const [searchMode, setSearchMode] = useState<'local' | 'web' | 'mixed'>('local')
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const {
@@ -71,7 +73,7 @@ export default function Chat() {
     setInputValue('')
     // 只锁按钮一瞬间，流式响应由 store 管理
     setSending(true)
-    sendMessage(targetSessionId, text)
+    sendMessage(targetSessionId, text, searchMode)
       .catch(() => message.error('发送失败，请重试'))
       .finally(() => setSending(false))
   }
@@ -170,29 +172,56 @@ export default function Chat() {
           background: '#fff',
           borderTop: '1px solid #f0f0f0',
         }}>
-          <div style={{ maxWidth: 800, margin: '0 auto', display: 'flex', gap: 12 }}>
-            <Input.TextArea
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onPressEnter={(e) => {
-                if (!e.shiftKey) {
-                  e.preventDefault()
-                  handleSend()
-                }
-              }}
-              placeholder={isStreaming ? "AI 回复中，可直接输入新消息中断当前回复..." : "输入你的问题，按 Enter 发送，Shift+Enter 换行"}
-              autoSize={{ minRows: 1, maxRows: 5 }}
-              style={{ flex: 1 }}
-            />
-            <Button
-              type="primary"
-              icon={<SendOutlined />}
-              onClick={handleSend}
-              loading={sending}
-              disabled={!inputValue.trim()}
-            >
-              发送
-            </Button>
+          <div style={{ maxWidth: 800, margin: '0 auto' }}>
+            {/* 搜索模式选择器 */}
+            <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Text type="secondary" style={{ fontSize: 13 }}>搜索模式：</Text>
+              <Select
+                value={searchMode}
+                onChange={setSearchMode}
+                size="small"
+                style={{ width: 180 }}
+              >
+                <Option value="local">
+                  <DatabaseOutlined /> 本地知识库
+                </Option>
+                <Option value="web">
+                  <GlobalOutlined /> 仅联网搜索
+                </Option>
+                <Option value="mixed">
+                  <MergeCellsOutlined /> 混合搜索（推荐）
+                </Option>
+              </Select>
+              <Tooltip title="本地：仅搜索上传的文档；联网：仅搜索互联网；混合：同时搜索本地和联网">
+                <Text type="secondary" style={{ fontSize: 12 }}>ⓘ</Text>
+              </Tooltip>
+            </div>
+
+            {/* 输入框和发送按钮 */}
+            <div style={{ display: 'flex', gap: 12 }}>
+              <Input.TextArea
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onPressEnter={(e) => {
+                  if (!e.shiftKey) {
+                    e.preventDefault()
+                    handleSend()
+                  }
+                }}
+                placeholder={isStreaming ? "AI 回复中，可直接输入新消息中断当前回复..." : "输入你的问题，按 Enter 发送，Shift+Enter 换行"}
+                autoSize={{ minRows: 1, maxRows: 5 }}
+                style={{ flex: 1 }}
+              />
+              <Button
+                type="primary"
+                icon={<SendOutlined />}
+                onClick={handleSend}
+                loading={sending}
+                disabled={!inputValue.trim()}
+              >
+                发送
+              </Button>
+            </div>
           </div>
         </div>
       </div>

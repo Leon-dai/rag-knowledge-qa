@@ -95,4 +95,6 @@ async def send_message(
     db: AsyncSession = Depends(get_db),
 ):
     """发送消息，返回 SSE 流式响应"""
-    return await ChatService.send_message(db, session_id, current_user.id, data.content)
+    return await ChatService.send_message(
+        db, session_id, current_user.id, data.content, data.search_mode
+    )

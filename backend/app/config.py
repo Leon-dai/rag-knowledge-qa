@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     # 阿里云百炼
     dashscope_api_key: str = ""
 
+    # Tavily 搜索 API
+    tavily_api_key: str = ""
+
     # JWT
     jwt_secret_key: str = ""
     jwt_algorithm: str = "HS256"

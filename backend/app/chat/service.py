@@ -188,6 +188,7 @@ class ChatService:
         session_id: str,
         user_id: str,
         content: str,
+        search_mode: str = "local",
     ) -> StreamingResponse:
         """发送消息并返回 SSE 流式响应"""
         # 验证会话归属
@@ -236,7 +237,7 @@ class ChatService:
                     content="",
                 )
 
-                async for sse_data in RAGService.query(content, chat_history):
+                async for sse_data in RAGService.query(content, chat_history, search_mode):
                     # 解析 SSE 数据获取 token 和 citations
                     if "data:" in sse_data or sse_data.startswith("data:"):
                         # 直接透传 SSE 给客户端
