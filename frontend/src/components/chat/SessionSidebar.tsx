@@ -184,7 +184,14 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
 
       {/* 底部用户信息 - 可点击 */}
       {user && (
-        <Dropdown menu={{ items: userMenuItems }} placement="topRight">
+        <Dropdown
+          menu={{
+            items: userMenuItems,
+            style: { width: 160 },
+          }}
+          placement="topLeft"
+          trigger={['click']}
+        >
           <div style={{
             padding: '12px 16px',
             borderTop: '1px solid #f0f0f0',
