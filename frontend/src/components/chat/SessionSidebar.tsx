@@ -87,6 +87,7 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
   return (
     <div style={{
       width: 280,
+      height: '100%',
       borderRight: '1px solid #f0f0f0',
       background: '#fafafa',
       display: 'flex',
