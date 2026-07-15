@@ -87,13 +87,13 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
   return (
     <div style={{
       width: collapsed ? 0 : 280,
-      minWidth: collapsed ? 0 : 280,
       borderRight: collapsed ? 'none' : '1px solid #f0f0f0',
       background: '#fafafa',
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
-      transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+      transition: 'width 0.25s cubic-bezier(0.25, 0.1, 0.25, 1)',
+      flexShrink: 0,
     }}>
       {/* Logo 区域 */}
       <div style={{
