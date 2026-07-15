@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button, Typography, Tooltip, Dropdown, Avatar, Input, message } from 'antd'
-import { PlusOutlined, MenuFoldOutlined, UserOutlined, LogoutOutlined, KeyOutlined, SettingOutlined, MoreOutlined, PushpinOutlined, ShareAltOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons'
+import { PlusOutlined, MenuFoldOutlined, UserOutlined, LogoutOutlined, KeyOutlined, SettingOutlined, MoreOutlined, PushpinOutlined, ShareAltOutlined, DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useChatStore } from '../../stores/chatStore'
 import { useAuthStore } from '../../stores/authStore'
@@ -25,6 +25,9 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
     if (!user) fetchMe()
   }, [user, fetchMe])
 
+  // 置顶会话列表
+  const [pinnedIds, setPinnedIds] = useState<string[]>([])
+
   const handleCreate = async () => {
     await createSession()
     const { currentSession } = useChatStore.getState()
@@ -42,6 +45,12 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
 
   const handleRename = async (id: string, newTitle: string) => {
     await renameSession(id, newTitle)
+  }
+
+  const handleTogglePin = (id: string) => {
+    setPinnedIds(prev =>
+      prev.includes(id) ? prev.filter(i => i !== id) : [id, ...prev]
+    )
   }
 
   const handleLogout = () => {
@@ -80,12 +89,17 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
     },
   ]
 
-  // 按时间分组
+  // 置顶的会话
+  const pinnedSessions = sessions.filter(s => pinnedIds.includes(s.id))
+  // 未置顶的会话
+  const unpinnedSessions = sessions.filter(s => !pinnedIds.includes(s.id))
+
+  // 按时间分组（未置顶的）
   const groupedSessions = {
-    today: sessions.filter(s => dayjs(s.updated_at).isSame(dayjs(), 'day')),
-    yesterday: sessions.filter(s => dayjs(s.updated_at).isSame(dayjs().subtract(1, 'day'), 'day')),
-    week: sessions.filter(s => dayjs(s.updated_at).isAfter(dayjs().subtract(7, 'day')) && !dayjs(s.updated_at).isSame(dayjs(), 'day') && !dayjs(s.updated_at).isSame(dayjs().subtract(1, 'day'), 'day')),
-    month: sessions.filter(s => dayjs(s.updated_at).isAfter(dayjs().subtract(30, 'day')) && !dayjs(s.updated_at).isAfter(dayjs().subtract(7, 'day'))),
+    today: unpinnedSessions.filter(s => dayjs(s.updated_at).isSame(dayjs(), 'day')),
+    yesterday: unpinnedSessions.filter(s => dayjs(s.updated_at).isSame(dayjs().subtract(1, 'day'), 'day')),
+    week: unpinnedSessions.filter(s => dayjs(s.updated_at).isAfter(dayjs().subtract(7, 'day')) && !dayjs(s.updated_at).isSame(dayjs(), 'day') && !dayjs(s.updated_at).isSame(dayjs().subtract(1, 'day'), 'day')),
+    month: unpinnedSessions.filter(s => dayjs(s.updated_at).isAfter(dayjs().subtract(30, 'day')) && !dayjs(s.updated_at).isAfter(dayjs().subtract(7, 'day'))),
   }
 
   return (
@@ -159,31 +173,96 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
       </div>
 
       {/* 会话列表 */}
-      <div style={{ flex: 1, overflow: 'auto', padding: '0 8px' }}>
+      <div style={{
+        flex: 1,
+        overflow: 'auto',
+        padding: '0 8px',
+        position: 'relative',
+      }}>
+        {/* 置顶组 */}
+        {pinnedSessions.length > 0 && (
+          <>
+            <Text type="secondary" style={{ fontSize: 11, padding: '8px 8px 4px', display: 'block' }}>置顶</Text>
+            <SessionList
+              sessions={pinnedSessions}
+              onDelete={handleDelete}
+              onRename={handleRename}
+              onTogglePin={handleTogglePin}
+              pinnedIds={pinnedIds}
+              onNavigate={navigate}
+              sessionId={sessionId}
+            />
+          </>
+        )}
+        {/* 今天 */}
         {groupedSessions.today.length > 0 && (
           <>
             <Text type="secondary" style={{ fontSize: 11, padding: '8px 8px 4px', display: 'block' }}>今天</Text>
-            <SessionList sessions={groupedSessions.today} onDelete={handleDelete} onRename={handleRename} onNavigate={navigate} sessionId={sessionId} />
+            <SessionList
+              sessions={groupedSessions.today}
+              onDelete={handleDelete}
+              onRename={handleRename}
+              onTogglePin={handleTogglePin}
+              pinnedIds={pinnedIds}
+              onNavigate={navigate}
+              sessionId={sessionId}
+            />
           </>
         )}
+        {/* 昨天 */}
         {groupedSessions.yesterday.length > 0 && (
           <>
             <Text type="secondary" style={{ fontSize: 11, padding: '8px 8px 4px', display: 'block' }}>昨天</Text>
-            <SessionList sessions={groupedSessions.yesterday} onDelete={handleDelete} onRename={handleRename} onNavigate={navigate} sessionId={sessionId} />
+            <SessionList
+              sessions={groupedSessions.yesterday}
+              onDelete={handleDelete}
+              onRename={handleRename}
+              onTogglePin={handleTogglePin}
+              pinnedIds={pinnedIds}
+              onNavigate={navigate}
+              sessionId={sessionId}
+            />
           </>
         )}
+        {/* 7 天内 */}
         {groupedSessions.week.length > 0 && (
           <>
             <Text type="secondary" style={{ fontSize: 11, padding: '8px 8px 4px', display: 'block' }}>7 天内</Text>
-            <SessionList sessions={groupedSessions.week} onDelete={handleDelete} onRename={handleRename} onNavigate={navigate} sessionId={sessionId} />
+            <SessionList
+              sessions={groupedSessions.week}
+              onDelete={handleDelete}
+              onRename={handleRename}
+              onTogglePin={handleTogglePin}
+              pinnedIds={pinnedIds}
+              onNavigate={navigate}
+              sessionId={sessionId}
+            />
           </>
         )}
+        {/* 30 天内 */}
         {groupedSessions.month.length > 0 && (
           <>
             <Text type="secondary" style={{ fontSize: 11, padding: '8px 8px 4px', display: 'block' }}>30 天内</Text>
-            <SessionList sessions={groupedSessions.month} onDelete={handleDelete} onRename={handleRename} onNavigate={navigate} sessionId={sessionId} />
+            <SessionList
+              sessions={groupedSessions.month}
+              onDelete={handleDelete}
+              onRename={handleRename}
+              onTogglePin={handleTogglePin}
+              pinnedIds={pinnedIds}
+              onNavigate={navigate}
+              sessionId={sessionId}
+            />
           </>
         )}
+
+        {/* 底部模糊渐变 */}
+        <div style={{
+          position: 'sticky',
+          bottom: 0,
+          height: 24,
+          background: 'linear-gradient(to top, rgba(250, 250, 250, 1) 0%, rgba(250, 250, 250, 0) 100%)',
+          pointerEvents: 'none',
+        }} />
       </div>
 
       {/* 底部用户信息 - 可点击 */}
@@ -198,7 +277,6 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
         >
           <div style={{
             padding: '12px 16px',
-            borderTop: '1px solid #f0f0f0',
             display: 'flex',
             alignItems: 'center',
             gap: 8,
@@ -219,32 +297,51 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
 }
 
 // 会话列表组件
-function SessionList({ sessions, onDelete, onNavigate, onRename, sessionId }: {
+function SessionList({ sessions, onDelete, onNavigate, onRename, onTogglePin, pinnedIds, sessionId }: {
   sessions: any[]
   onDelete: (id: string) => void
   onNavigate: (path: string) => void
   onRename: (id: string, newTitle: string) => void
+  onTogglePin: (id: string) => void
+  pinnedIds: string[]
   sessionId: string | undefined
 }) {
   const [hoveredId, setHoveredId] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editValue, setEditValue] = useState('')
+
+  const handleStartRename = (id: string, title: string) => {
+    setEditingId(id)
+    setEditValue(title)
+  }
+
+  const handleConfirmRename = (id: string) => {
+    if (editValue.trim()) {
+      onRename(id, editValue.trim())
+    }
+    setEditingId(null)
+    setEditValue('')
+  }
+
+  const handleCancelRename = () => {
+    setEditingId(null)
+    setEditValue('')
+  }
 
   return (
     <div>
       {sessions.map((session) => {
         const isSelected = sessionId === session.id
         const isHovered = hoveredId === session.id
+        const isEditing = editingId === session.id
+        const isPinned = pinnedIds.includes(session.id)
 
         const menuItems: MenuProps['items'] = [
           {
             key: 'rename',
             icon: <EditOutlined />,
             label: '重命名',
-            onClick: () => {
-              const newTitle = prompt('输入新标题:', session.title)
-              if (newTitle && newTitle.trim()) {
-                onRename(session.id, newTitle.trim())
-              }
-            },
+            onClick: () => handleStartRename(session.id, session.title),
           },
           {
             key: 'share',
@@ -267,7 +364,9 @@ function SessionList({ sessions, onDelete, onNavigate, onRename, sessionId }: {
         return (
           <div
             key={session.id}
-            onClick={() => onNavigate(`/chat/${session.id}`)}
+            onClick={() => {
+              if (!isEditing) onNavigate(`/chat/${session.id}`)
+            }}
             onMouseEnter={() => setHoveredId(session.id)}
             onMouseLeave={() => setHoveredId(null)}
             style={{
@@ -282,27 +381,65 @@ function SessionList({ sessions, onDelete, onNavigate, onRename, sessionId }: {
               transition: 'background 0.2s',
             }}
           >
-            <Text
-              ellipsis={{ tooltip: session.title }}
-              style={{
-                flex: 1,
-                fontSize: 13,
-                color: isSelected ? '#1677ff' : undefined,
-              }}
-            >
-              {session.title}
-            </Text>
+            {/* 内联重命名 */}
+            {isEditing ? (
+              <div style={{ flex: 1, display: 'flex', gap: 4, alignItems: 'center' }}>
+                <Input
+                  size="small"
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  onPressEnter={() => handleConfirmRename(session.id)}
+                  autoFocus
+                  style={{ flex: 1, fontSize: 13 }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<CheckOutlined />}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleConfirmRename(session.id)
+                  }}
+                  style={{ padding: 0, width: 20, height: 20 }}
+                />
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<CloseOutlined />}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleCancelRename()
+                  }}
+                  style={{ padding: 0, width: 20, height: 20 }}
+                />
+              </div>
+            ) : (
+              <Text
+                ellipsis={{ tooltip: session.title }}
+                style={{
+                  flex: 1,
+                  fontSize: 13,
+                  color: isSelected ? '#1677ff' : undefined,
+                }}
+              >
+                {session.title}
+              </Text>
+            )}
 
             {/* 悬停时显示图标 */}
-            {isHovered && (
+            {!isEditing && isHovered && (
               <div style={{ display: 'flex', gap: 4, marginLeft: 8, flexShrink: 0 }}>
-                <Tooltip title="置顶">
+                <Tooltip title={isPinned ? '取消置顶' : '置顶'}>
                   <Button
                     type="text"
                     size="small"
-                    icon={<PushpinOutlined />}
+                    icon={<PushpinOutlined style={{ color: isPinned ? '#1677ff' : undefined }} />}
                     style={{ fontSize: 12, padding: 0, width: 20, height: 20 }}
-                    onClick={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onTogglePin(session.id)
+                    }}
                   />
                 </Tooltip>
                 <Dropdown menu={{ items: menuItems }} trigger={['click']}>
