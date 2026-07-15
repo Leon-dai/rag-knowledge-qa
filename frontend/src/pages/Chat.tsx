@@ -89,15 +89,30 @@ export default function Chat() {
   }
 
   return (
-    <div style={{ display: 'flex', height: '100vh', background: '#fff' }}>
-      {/* 会话侧边栏 */}
-      <SessionSidebar
-        collapsed={sidebarCollapsed}
-        onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-      />
+    <div style={{ display: 'flex', height: '100vh', background: '#fff', position: 'relative', overflow: 'hidden' }}>
+      {/* 会话侧边栏 - 用绝对定位实现滑入滑出动画 */}
+      <div style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        height: '100%',
+        zIndex: 10,
+      }}>
+        <SessionSidebar
+          collapsed={sidebarCollapsed}
+          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+        />
+      </div>
 
       {/* 聊天主区域 */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <div style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        minWidth: 0,
+        marginLeft: sidebarCollapsed ? 0 : 280,
+        transition: 'margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+      }}>
         {/* 折叠后的浮动按钮 - 类似 DeepSeek */}
         {sidebarCollapsed && (
           <div style={{
