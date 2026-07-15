@@ -22,6 +22,22 @@ def set_request_id(rid: str):
     _request_id.set(rid)
 
 
+def _log_format(record):
+    """自定义日志格式，处理 request_id 缺失的情况"""
+    request_id = record["extra"].get("request_id", "")
+    if not request_id:
+        request_id = "-"
+
+    format_string = (
+        "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
+        "<level>{level: <8}</level> | "
+        f"<cyan>{request_id}</cyan> | "
+        "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
+        "<level>{message}</level>\n{exception}"
+    )
+    return format_string
+
+
 def configure_logging():
     """配置 loguru：控制台彩色 + 文件持久化"""
     # 移除默认 handler
@@ -30,13 +46,7 @@ def configure_logging():
     # 控制台：彩色、带格式
     logger.add(
         sys.stderr,
-        format=(
-            "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
-            "<level>{level: <8}</level> | "
-            "<cyan>{extra[request_id]}</cyan> | "
-            "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
-            "<level>{message}</level>"
-        ),
+        format=_log_format,
         level="DEBUG",
         colorize=True,
     )

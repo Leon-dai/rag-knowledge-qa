@@ -49,7 +49,7 @@ class WebSearcher:
                 self._ddg_search = False
         return self._ddg_search if self._ddg_search is not False else None
 
-    def search_tavily(self, query: str, max_results: int = 5) -> List[WebSearchResult]:
+    def search_tavily(self, query: str, max_results: int = 10) -> List[WebSearchResult]:
         """使用 Tavily 搜索"""
         client = self._get_tavily_client()
         if not client:
