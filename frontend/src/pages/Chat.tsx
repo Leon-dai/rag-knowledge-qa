@@ -1,23 +1,29 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
-import { Input, Button, Spin, Empty, Typography, message, Skeleton, Select, Tooltip } from 'antd'
-import { SendOutlined, PlusOutlined, GlobalOutlined, DatabaseOutlined, MergeCellsOutlined } from '@ant-design/icons'
+import { Input, Button, Empty, Typography, message, Skeleton, Tooltip } from 'antd'
+import { SendOutlined, PlusOutlined, GlobalOutlined, DatabaseOutlined, MergeCellsOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
 import { useChatStore } from '../stores/chatStore'
 import SessionSidebar from '../components/chat/SessionSidebar'
 import MessageBubble from '../components/chat/MessageBubble'
 
 const { Text } = Typography
-const { Option } = Select
+
+// 搜索模式按钮配置
+const SEARCH_MODES = [
+  { value: 'local', label: '知识库', icon: <DatabaseOutlined />, tooltip: '仅搜索上传的文档' },
+  { value: 'mixed', label: '智能搜索', icon: <MergeCellsOutlined />, tooltip: '同时搜索知识库和互联网（推荐）' },
+  { value: 'web', label: '联网搜索', icon: <GlobalOutlined />, tooltip: '仅搜索互联网' },
+]
 
 export default function Chat() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const [inputValue, setInputValue] = useState('')
   const [sending, setSending] = useState(false)
-  const [searchMode, setSearchMode] = useState<'local' | 'web' | 'mixed'>('local')
+  const [searchMode, setSearchMode] = useState<'local' | 'web' | 'mixed'>('mixed')
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const {
-    sessions,
     currentSession,
     messages,
     streamingContent,
@@ -42,7 +48,6 @@ export default function Chat() {
     }
   }, [sessionId, selectSession, fetchMessages])
 
-  // 流式输出时，内容满了就钉在底部，新内容自然往上推
   useEffect(() => {
     if (!isStreaming) return
     const el = messagesEndRef.current
@@ -59,7 +64,6 @@ export default function Chat() {
     let targetSessionId = currentSession?.id
 
     if (!targetSessionId) {
-      // 自动创建新会话
       await createSession()
       const { currentSession: newSession } = useChatStore.getState()
       targetSessionId = newSession?.id
@@ -69,9 +73,7 @@ export default function Chat() {
       }
     }
 
-    // 立即清空输入框，不等待响应
     setInputValue('')
-    // 只锁按钮一瞬间，流式响应由 store 管理
     setSending(true)
     sendMessage(targetSessionId, text, searchMode)
       .catch(() => message.error('发送失败，请重试'))
@@ -87,12 +89,45 @@ export default function Chat() {
   }
 
   return (
-    <div style={{ display: 'flex', height: 'calc(100vh - 64px)' }}>
+    <div style={{ display: 'flex', height: '100vh', background: '#fff' }}>
       {/* 会话侧边栏 */}
-      <SessionSidebar />
+      <SessionSidebar
+        collapsed={sidebarCollapsed}
+        onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+      />
 
       {/* 聊天主区域 */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        {/* 折叠按钮 - 当侧边栏折叠时显示 */}
+        {sidebarCollapsed && (
+          <Tooltip title="展开侧边栏">
+            <Button
+              type="text"
+              icon={<MenuUnfoldOutlined />}
+              onClick={() => setSidebarCollapsed(false)}
+              style={{
+                position: 'absolute',
+                top: 16,
+                left: 16,
+                zIndex: 100,
+              }}
+            />
+          </Tooltip>
+        )}
+
+        {/* 对话标题 - 类似 DeepSeek 顶部居中 */}
+        {currentSession && (
+          <div style={{
+            textAlign: 'center',
+            padding: '16px 24px 8px',
+            background: '#fff',
+          }}>
+            <Text style={{ fontSize: 16, fontWeight: 500 }}>
+              {currentSession.title}
+            </Text>
+          </div>
+        )}
+
         {/* 消息列表 */}
         <div style={{
           flex: 1,
@@ -114,7 +149,7 @@ export default function Chat() {
             }}>
               <Empty description="开始提问吧">
                 <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateSession}>
-                  新建对话
+                  开启新对话
                 </Button>
               </Empty>
             </div>
@@ -123,7 +158,6 @@ export default function Chat() {
               {messages.map((msg) => (
                 <MessageBubble key={msg.id} message={msg} />
               ))}
-              {/* 管道状态显示（呼吸灯 + 动态文字） */}
               {isStreaming && (
                 <div style={{
                   display: 'flex',
@@ -143,7 +177,6 @@ export default function Chat() {
                   <span style={{
                     color: '#888',
                     fontSize: 13,
-                    transition: 'color 0.3s',
                   }}>
                     {statusText || (streamingContent ? '正在生成回答...' : '正在处理...')}
                   </span>
@@ -166,62 +199,77 @@ export default function Chat() {
           )}
         </div>
 
-        {/* 输入区域 */}
+        {/* 输入区域 - DeepSeek 风格 */}
         <div style={{
-          padding: '16px 24px',
+          padding: '16px 24px 24px',
           background: '#fff',
-          borderTop: '1px solid #f0f0f0',
         }}>
           <div style={{ maxWidth: 800, margin: '0 auto' }}>
-            {/* 搜索模式选择器 */}
-            <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Text type="secondary" style={{ fontSize: 13 }}>搜索模式：</Text>
-              <Select
-                value={searchMode}
-                onChange={setSearchMode}
-                size="small"
-                style={{ width: 180 }}
-              >
-                <Option value="local">
-                  <DatabaseOutlined /> 本地知识库
-                </Option>
-                <Option value="web">
-                  <GlobalOutlined /> 仅联网搜索
-                </Option>
-                <Option value="mixed">
-                  <MergeCellsOutlined /> 混合搜索（推荐）
-                </Option>
-              </Select>
-              <Tooltip title="本地：仅搜索上传的文档；联网：仅搜索互联网；混合：同时搜索本地和联网">
-                <Text type="secondary" style={{ fontSize: 12 }}>ⓘ</Text>
-              </Tooltip>
+            {/* 搜索模式按钮 */}
+            <div style={{ marginBottom: 12, display: 'flex', gap: 8 }}>
+              {SEARCH_MODES.map((mode) => (
+                <Tooltip key={mode.value} title={mode.tooltip}>
+                  <Button
+                    type={searchMode === mode.value ? 'primary' : 'default'}
+                    size="small"
+                    icon={mode.icon}
+                    onClick={() => setSearchMode(mode.value as 'local' | 'web' | 'mixed')}
+                    style={{ borderRadius: 20 }}
+                  >
+                    {mode.label}
+                  </Button>
+                </Tooltip>
+              ))}
             </div>
 
-            {/* 输入框和发送按钮 */}
-            <div style={{ display: 'flex', gap: 12 }}>
-              <Input.TextArea
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onPressEnter={(e) => {
-                  if (!e.shiftKey) {
-                    e.preventDefault()
-                    handleSend()
-                  }
-                }}
-                placeholder={isStreaming ? "AI 回复中，可直接输入新消息中断当前回复..." : "输入你的问题，按 Enter 发送，Shift+Enter 换行"}
-                autoSize={{ minRows: 1, maxRows: 5 }}
-                style={{ flex: 1 }}
-              />
-              <Button
-                type="primary"
-                icon={<SendOutlined />}
-                onClick={handleSend}
-                loading={sending}
-                disabled={!inputValue.trim()}
-              >
-                发送
-              </Button>
+            {/* 输入框 */}
+            <div style={{
+              background: '#f5f5f5',
+              padding: '12px 16px',
+              borderRadius: 12,
+              border: '1px solid #e8e8e8',
+              transition: 'border-color 0.3s',
+            }}>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
+                <Input.TextArea
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onPressEnter={(e) => {
+                    if (!e.shiftKey) {
+                      e.preventDefault()
+                      handleSend()
+                    }
+                  }}
+                  placeholder={isStreaming ? "AI 回复中..." : "输入你的问题，按 Enter 发送"}
+                  autoSize={{ minRows: 1, maxRows: 5 }}
+                  style={{
+                    flex: 1,
+                    border: 'none',
+                    background: 'transparent',
+                    boxShadow: 'none',
+                    resize: 'none',
+                  }}
+                />
+                <Button
+                  type="primary"
+                  shape="circle"
+                  icon={<SendOutlined />}
+                  onClick={handleSend}
+                  loading={sending}
+                  disabled={!inputValue.trim()}
+                  style={{
+                    width: 36,
+                    height: 36,
+                    flexShrink: 0,
+                  }}
+                />
+              </div>
             </div>
+
+            {/* 底部提示 */}
+            <Text type="secondary" style={{ fontSize: 11, display: 'block', textAlign: 'center', marginTop: 8 }}>
+              内容由 AI 生成，请仔细甄别
+            </Text>
           </div>
         </div>
       </div>

@@ -1,8 +1,7 @@
 import { useEffect } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { Layout, Menu, Button, Dropdown, Avatar, Typography } from 'antd'
+import { Dropdown, Avatar, Typography } from 'antd'
 import {
-  MessageOutlined,
   UserOutlined,
   LogoutOutlined,
   KeyOutlined,
@@ -11,12 +10,10 @@ import {
 import type { MenuProps } from 'antd'
 import { useAuthStore } from '../../stores/authStore'
 
-const { Header, Content } = Layout
 const { Text } = Typography
 
 export default function AppLayout() {
   const navigate = useNavigate()
-  const location = useLocation()
   const { user, logout, fetchMe } = useAuthStore()
 
   useEffect(() => {
@@ -59,46 +56,32 @@ export default function AppLayout() {
     },
   ]
 
-  const menuItems: MenuProps['items'] = [
-    {
-      key: '/chat',
-      icon: <MessageOutlined />,
-      label: '知识库问答',
-    },
-  ]
-
   return (
-    <Layout style={{ minHeight: '100vh' }}>
-      <Header style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        background: '#fff',
-        borderBottom: '1px solid #f0f0f0',
-        padding: '0 24px',
-        position: 'sticky',
-        top: 0,
-        zIndex: 100,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-          <Text strong style={{ fontSize: 18 }}>📚 知识库问答系统</Text>
-          <Menu
-            mode="horizontal"
-            selectedKeys={[location.pathname.startsWith('/admin') ? '' : '/chat']}
-            items={menuItems}
-            onClick={({ key }) => navigate(key)}
-            style={{ border: 'none' }}
-          />
-        </div>
+    <div style={{ height: '100vh', overflow: 'hidden' }}>
+      <Outlet />
+
+      {/* 用户菜单 - 放在聊天页面内部 */}
+      {user && (
         <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
-          <Button type="text" icon={<Avatar icon={<UserOutlined />} size="small" />}>
-            {user?.username || '用户'}
-          </Button>
+          <div style={{
+            position: 'fixed',
+            top: 16,
+            right: 16,
+            zIndex: 1000,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '6px 12px',
+            borderRadius: 20,
+            background: '#fff',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+          }}>
+            <Avatar icon={<UserOutlined />} size="small" />
+            <Text style={{ fontSize: 13 }}>{user?.username || '用户'}</Text>
+          </div>
         </Dropdown>
-      </Header>
-      <Content>
-        <Outlet />
-      </Content>
-    </Layout>
+      )}
+    </div>
   )
 }
