@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Button, List, Typography, Popconfirm, Tooltip, Dropdown, Avatar } from 'antd'
 import { PlusOutlined, DeleteOutlined, MenuFoldOutlined, UserOutlined, LogoutOutlined, KeyOutlined, SettingOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -17,7 +18,12 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
   const navigate = useNavigate()
   const { sessionId } = useParams<{ sessionId: string }>()
   const { sessions, createSession, deleteSession } = useChatStore()
-  const { user, logout } = useAuthStore()
+  const { user, logout, fetchMe } = useAuthStore()
+
+  // 确保用户信息已加载
+  useEffect(() => {
+    if (!user) fetchMe()
+  }, [user, fetchMe])
 
   const handleCreate = async () => {
     await createSession()

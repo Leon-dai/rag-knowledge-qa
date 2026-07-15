@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { Input, Button, Empty, Typography, message, Skeleton, Tooltip } from 'antd'
-import { SendOutlined, PlusOutlined, GlobalOutlined, DatabaseOutlined, MergeCellsOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
+import { SendOutlined, PlusOutlined, GlobalOutlined, DatabaseOutlined, MergeCellsOutlined, MenuUnfoldOutlined, SearchOutlined, PlusCircleOutlined } from '@ant-design/icons'
 import { useChatStore } from '../stores/chatStore'
 import SessionSidebar from '../components/chat/SessionSidebar'
 import MessageBubble from '../components/chat/MessageBubble'
@@ -98,24 +98,70 @@ export default function Chat() {
 
       {/* 聊天主区域 */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        {/* 折叠按钮 - 当侧边栏折叠时显示 */}
+        {/* 折叠后的浮动按钮 - 类似 DeepSeek */}
         {sidebarCollapsed && (
-          <Tooltip title="展开侧边栏">
-            <Button
-              type="text"
-              icon={<MenuUnfoldOutlined />}
-              onClick={() => setSidebarCollapsed(false)}
-              style={{
-                position: 'absolute',
-                top: 16,
-                left: 16,
-                zIndex: 100,
-              }}
-            />
-          </Tooltip>
+          <div style={{
+            position: 'absolute',
+            top: 16,
+            left: 16,
+            zIndex: 100,
+            display: 'flex',
+            gap: 8,
+          }}>
+            <Tooltip title="展开侧边栏">
+              <Button
+                type="text"
+                icon={<MenuUnfoldOutlined />}
+                onClick={() => setSidebarCollapsed(false)}
+                style={{
+                  width: 36,
+                  height: 36,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: '#fff',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                  borderRadius: 8,
+                }}
+              />
+            </Tooltip>
+            <Tooltip title="搜索">
+              <Button
+                type="text"
+                icon={<SearchOutlined />}
+                style={{
+                  width: 36,
+                  height: 36,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: '#fff',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                  borderRadius: 8,
+                }}
+              />
+            </Tooltip>
+            <Tooltip title="新建对话">
+              <Button
+                type="text"
+                icon={<PlusCircleOutlined />}
+                onClick={handleCreateSession}
+                style={{
+                  width: 36,
+                  height: 36,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: '#fff',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                  borderRadius: 8,
+                }}
+              />
+            </Tooltip>
+          </div>
         )}
 
-        {/* 对话标题 - 类似 DeepSeek 顶部居中 */}
+        {/* 对话标题 */}
         {currentSession && (
           <div style={{
             textAlign: 'center',
@@ -199,7 +245,7 @@ export default function Chat() {
           )}
         </div>
 
-        {/* 输入区域 - DeepSeek 风格 */}
+        {/* 输入区域 */}
         <div style={{
           padding: '16px 24px 24px',
           background: '#fff',
