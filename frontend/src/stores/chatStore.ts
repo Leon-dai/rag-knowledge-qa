@@ -72,9 +72,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   fetchMessages: async (sessionId: string) => {
-    // 只在消息为空时（首次加载）显示骨架屏，切换会话时静默加载
-    const { messages } = get()
-    if (messages.length === 0) {
+    // 已经选中过会话 → 切换，静默加载；未选中过 → 首次加载，显示骨架屏
+    const { currentSession } = get()
+    const isFirstLoad = !currentSession
+    if (isFirstLoad) {
       set({ loading: true })
     }
     try {
