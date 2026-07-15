@@ -60,7 +60,8 @@ class WebSearcher:
             response = client.search(
                 query=query,
                 search_depth="basic",
-                max_results=max_results
+                max_results=max_results,
+                time_range="week"  # 搜索最近一周的结果，保证时效性
             )
 
             results = []
