@@ -10,10 +10,16 @@ BM25 公式:
 参考: Okapi BM25 (Robertson et al., 1995)
 """
 import math
+import pickle
+from pathlib import Path
 from typing import List
 from langchain_core.documents import Document
 from app.rag.retriever import get_vector_store
 from app.logging import logger
+
+
+# 持久化文件路径
+BM25_CACHE_FILE = Path(__file__).parent.parent.parent / "data" / "cache" / "bm25_index.pkl"
 
 
 class SimpleBM25:
@@ -138,6 +144,45 @@ _bm25: SimpleBM25 | None = None
 _docs_meta: list = []  # 文档元数据
 
 
+def save_bm25_index():
+    """持久化 BM25 索引到磁盘"""
+    global _bm25, _docs_meta
+
+    if _bm25 is None:
+        return
+
+    try:
+        BM25_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(BM25_CACHE_FILE, "wb") as f:
+            pickle.dump({"bm25": _bm25, "docs_meta": _docs_meta}, f)
+        logger.info(f"BM25 索引已持久化到: {BM25_CACHE_FILE}")
+    except Exception as e:
+        logger.warning(f"持久化 BM25 索引失败: {e}")
+
+
+def load_bm25_index() -> bool:
+    """从磁盘加载 BM25 索引
+
+    Returns:
+        True if loaded successfully, False otherwise
+    """
+    global _bm25, _docs_meta
+
+    if not BM25_CACHE_FILE.exists():
+        return False
+
+    try:
+        with open(BM25_CACHE_FILE, "rb") as f:
+            data = pickle.load(f)
+            _bm25 = data["bm25"]
+            _docs_meta = data["docs_meta"]
+        logger.info(f"BM25 索引已从磁盘加载: {BM25_CACHE_FILE}")
+        return True
+    except Exception as e:
+        logger.warning(f"加载 BM25 索引失败: {e}")
+        return False
+
+
 def build_bm25_index():
     """从 ChromaDB 加载所有文档，构建 BM25 索引"""
     global _bm25, _docs_meta
@@ -165,13 +210,19 @@ def build_bm25_index():
     _docs_meta = metas
     logger.info(f"BM25 索引已构建: {len(texts)} chunks")
 
+    # 持久化到磁盘
+    save_bm25_index()
+
 
 def bm25_search(query: str, k: int = 8) -> List[Document]:
     """BM25 关键词搜索"""
     global _bm25, _docs_meta
 
     if _bm25 is None:
-        build_bm25_index()
+        # 先尝试从磁盘加载
+        if not load_bm25_index():
+            # 磁盘没有，从 ChromaDB 构建
+            build_bm25_index()
 
     if _bm25 is None or not _docs_meta:
         return []
