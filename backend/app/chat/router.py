@@ -98,3 +98,15 @@ async def send_message(
     return await ChatService.send_message(
         db, session_id, current_user.id, data.content, data.search_mode
     )
+
+
+# ==================== 搜索 ====================
+
+@router.get("/api/sessions/search")
+async def search_sessions(
+    q: str = Query(..., min_length=1, description="搜索关键词"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """搜索会话（标题 + 消息内容）"""
+    return await ChatService.search(db, current_user.id, q)

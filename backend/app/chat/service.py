@@ -5,7 +5,7 @@ from datetime import datetime
 
 from fastapi import HTTPException, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.models import Session, Message
@@ -16,6 +16,7 @@ from app.chat.schemas import (
     MessageListResponse,
 )
 from app.rag.service import RAGService
+from app.logging import logger
 
 
 def count_tokens(text: str) -> int:
@@ -287,7 +288,69 @@ class ChatService:
             },
         )
 
-    # ==================== 工具方法 ====================
+    # ==================== 搜索 ====================
+
+    @staticmethod
+    async def search(db: AsyncSession, user_id: str, query: str) -> dict:
+        """搜索会话（标题 + 消息内容），使用 LIKE 模糊匹配"""
+        keyword = f"%{query}%"
+
+        # 搜索消息内容 → 找到对应会话
+        result = await db.execute(
+            select(Session)
+            .join(Message, Message.session_id == Session.id)
+            .where(
+                and_(
+                    Session.user_id == user_id,
+                    or_(
+                        Message.content.like(keyword),
+                        Session.title.like(keyword),
+                    )
+                )
+            )
+            .order_by(Session.updated_at.desc())
+            .distinct()
+            .limit(20)
+        )
+        sessions = result.scalars().all()
+
+        items = []
+        for s in sessions:
+            # 获取匹配的消息预览
+            msg_result = await db.execute(
+                select(Message)
+                .where(Message.session_id == s.id, Message.content.like(keyword))
+                .order_by(Message.created_at.asc())
+                .limit(1)
+            )
+            first_match = msg_result.scalar_one_or_none()
+
+            items.append({
+                "id": s.id,
+                "title": s.title,
+                "message_count": s.message_count,
+                "updated_at": str(s.updated_at),
+                "match_preview": _highlight_match(first_match.content, query) if first_match else None,
+            })
+
+        return {"items": items, "total": len(items), "query": query}
+
+
+def _highlight_match(text: str, query: str, context_len: int = 40) -> str:
+    """提取匹配关键词周围的上下文"""
+    idx = text.lower().find(query.lower())
+    if idx == -1:
+        return text[:80] + ("..." if len(text) > 80 else "")
+
+    start = max(0, idx - context_len)
+    end = min(len(text), idx + len(query) + context_len)
+    preview = ""
+    if start > 0:
+        preview += "..."
+    preview += text[start:end]
+    if end < len(text):
+        preview += "..."
+    return preview
 
     @staticmethod
     async def _get_session_or_404(db: AsyncSession, session_id: str, user_id: str) -> Session:

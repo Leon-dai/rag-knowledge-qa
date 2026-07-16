@@ -21,4 +21,7 @@ export const chatAPI = {
       responseType: 'stream',
       headers: { Accept: 'text/event-stream' },
     }),
+
+  searchSessions: (q: string) =>
+    client.get('/sessions/search', { params: { q } }),
 }
