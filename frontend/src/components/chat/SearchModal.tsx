@@ -6,6 +6,25 @@ import { chatAPI } from '../../api/chat'
 
 const { Text } = Typography
 
+/** 高亮关键词 */
+function highlighter(text: string, keyword: string): React.ReactNode {
+  if (!keyword || !text) return text
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const regex = new RegExp(`(${escaped})`, 'gi')
+  const parts = text.split(regex)
+  return parts.map((part, i) => {
+    if (!part) return null
+    if (part.toLowerCase() === keyword.toLowerCase()) {
+      return (
+        <span key={i} style={{ background: '#FFD700', color: '#000', fontWeight: 600, borderRadius: 2, padding: '1px 2px' }}>
+          {part}
+        </span>
+      )
+    }
+    return part
+  })
+}
+
 interface Props {
   open: boolean
   onClose: () => void
@@ -51,9 +70,12 @@ export default function SearchModal({ open, onClose }: Props) {
     }
   }
 
-  const handleSelect = (sessionId: string) => {
+  const handleSelect = (sessionId: string, messageId?: string) => {
     onClose()
-    navigate(`/chat/${sessionId}`)
+    const params = new URLSearchParams()
+    params.set('hq', query)
+    if (messageId) params.set('hm', messageId)
+    navigate(`/chat/${sessionId}?${params.toString()}`)
   }
 
   if (!open) return null
@@ -116,7 +138,7 @@ export default function SearchModal({ open, onClose }: Props) {
             results.map((item: any) => (
               <div
                 key={item.id}
-                onClick={() => handleSelect(item.id)}
+                onClick={() => handleSelect(item.id, item.match_message_id)}
                 style={{
                   padding: '12px 16px',
                   borderRadius: 8,
@@ -126,11 +148,11 @@ export default function SearchModal({ open, onClose }: Props) {
                 onMouseEnter={(e) => e.currentTarget.style.background = '#f5f5f5'}
                 onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
               >
-                <Text strong style={{ fontSize: 14 }}>{item.title}</Text>
+                <Text strong style={{ fontSize: 14 }}>{highlighter(item.title, query)}</Text>
                 {item.match_preview && (
                   <div style={{ marginTop: 4 }}>
                     <Text type="secondary" style={{ fontSize: 12 }}>
-                      ...{item.match_preview}...
+                      ...{highlighter(item.match_preview, query)}...
                     </Text>
                   </div>
                 )}

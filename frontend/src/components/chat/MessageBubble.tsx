@@ -1,7 +1,9 @@
+import { useMemo } from 'react'
 import { Avatar, Typography, Space } from 'antd'
 import { UserOutlined, RobotOutlined } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import rehypeRaw from 'rehype-raw'
 import CitationCard from './CitationCard'
 
 const { Text } = Typography
@@ -17,13 +19,46 @@ interface Message {
 interface Props {
   message: Message
   isStreaming?: boolean
+  highlight?: string
 }
 
-export default function MessageBubble({ message, isStreaming }: Props) {
+const HIGHLIGHT_STYLE = 'background:#FFD700;color:#000;font-weight:600;border-radius:2px;padding:1px 3px;'
+
+/** 在文本中高亮关键词，返回 React 节点（用于非 markdown 的文本） */
+function highlightText(text: string, keyword: string): React.ReactNode {
+  if (!keyword) return text
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const regex = new RegExp(`(${escaped})`, 'gi')
+  const parts = text.split(regex)
+  return parts.map((part, i) => {
+    if (!part) return null
+    if (part.toLowerCase() === keyword.toLowerCase()) {
+      return <span key={i} className="search-highlight" style={{ background: '#FFD700', color: '#000', fontWeight: 600, borderRadius: 2, padding: '1px 3px' }}>{part}</span>
+    }
+    return part
+  })
+}
+
+/** 在 HTML/markdown 文本中嵌入高亮 span（用于 ReactMarkdown + rehype-raw） */
+function highlightInHtml(text: string, keyword: string): string {
+  if (!keyword) return text
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return text.replace(
+    new RegExp(`(${escaped})`, 'gi'),
+    `<span class="search-highlight" style="${HIGHLIGHT_STYLE}">$1</span>`
+  )
+}
+
+export default function MessageBubble({ message, isStreaming, highlight }: Props) {
   const isUser = message.role === 'user'
 
+  // AI 消息：预处理 markdown，在渲染前嵌入高亮 span
+  const aiContent = useMemo(() => {
+    if (!highlight) return message.content
+    return highlightInHtml(message.content, highlight)
+  }, [message.content, highlight])
+
   if (isUser) {
-    // 用户消息：蓝色气泡，右对齐
     return (
       <div style={{
         display: 'flex',
@@ -38,13 +73,12 @@ export default function MessageBubble({ message, isStreaming }: Props) {
           borderRadius: '12px 12px 4px 12px',
           padding: '10px 16px',
         }}>
-          <Text style={{ whiteSpace: 'pre-wrap' }}>{message.content}</Text>
+          <Text style={{ whiteSpace: 'pre-wrap' }}>{highlight ? highlightText(message.content, highlight) : message.content}</Text>
         </div>
       </div>
     )
   }
 
-  // AI 回复：无气泡，纯文本 + 头像，左对齐（ChatGPT 风格）
   return (
     <div style={{
       display: 'flex',
@@ -55,8 +89,11 @@ export default function MessageBubble({ message, isStreaming }: Props) {
       <Avatar icon={<RobotOutlined />} style={{ backgroundColor: '#52c41a', flexShrink: 0 }} />
       <div style={{ flex: 1, maxWidth: '85%' }}>
         <div className="markdown-content" style={{ lineHeight: 1.8, fontSize: 14 }}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {message.content}
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={highlight ? [rehypeRaw] : undefined}
+          >
+            {aiContent}
           </ReactMarkdown>
         </div>
 

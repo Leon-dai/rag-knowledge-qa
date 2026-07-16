@@ -25,6 +25,8 @@ interface ChatState {
   isStreaming: boolean
   statusText: string
   loading: boolean
+  // 搜索高亮：{ q: 搜索词, msg: 匹配的消息 ID }
+  searchHighlight: { q: string; msg: string } | null
 
   fetchSessions: () => Promise<void>
   createSession: () => Promise<void>
@@ -33,6 +35,7 @@ interface ChatState {
   sendMessage: (sessionId: string, content: string, searchMode?: 'local' | 'web' | 'mixed') => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
   renameSession: (sessionId: string, title: string) => Promise<void>
+  setSearchHighlight: (data: { q: string; msg: string } | null) => void
 }
 
 let abortController: AbortController | null = null
@@ -45,6 +48,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isStreaming: false,
   statusText: '',
   loading: false,
+  searchHighlight: null,
+
+  setSearchHighlight: (data) => set({ searchHighlight: data }),
 
   fetchSessions: async () => {
     try {
@@ -73,12 +79,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   fetchMessages: async (sessionId: string) => {
-    // 已经选中过会话 → 切换，静默加载；未选中过 → 首次加载，显示骨架屏
-    const { currentSession } = get()
-    const isFirstLoad = !currentSession
-    if (isFirstLoad) {
-      set({ loading: true })
-    }
+    set({ loading: true })
     try {
       const res = await chatAPI.getMessages(sessionId)
       set({ messages: res.data.items || [] })
