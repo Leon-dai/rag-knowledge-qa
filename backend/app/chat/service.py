@@ -294,27 +294,43 @@ class ChatService:
     async def search(db: AsyncSession, user_id: str, query: str) -> dict:
         """搜索会话（标题 + 消息内容），使用 LIKE 模糊匹配"""
         keyword = f"%{query}%"
+        seen = set()
 
-        # 搜索：用户拥有的会话中，标题或消息内容匹配
-        result = await db.execute(
-            select(Session)
-            .outerjoin(Message, Message.session_id == Session.id)
+        # 1. 搜索标题匹配的会话
+        session_result = await db.execute(
+            select(Session).where(
+                and_(Session.user_id == user_id, Session.title.like(keyword))
+            ).order_by(Session.updated_at.desc()).limit(20)
+        )
+        matched_sessions = {s.id: s for s in session_result.scalars().all()}
+        for sid in matched_sessions:
+            seen.add(sid)
+
+        # 2. 搜索消息内容匹配 → 找到对应会话
+        msg_result = await db.execute(
+            select(Message.session_id, Session)
+            .join(Session, Session.id == Message.session_id)
             .where(
-                or_(
-                    and_(Session.user_id == user_id, Session.title.like(keyword)),
-                    and_(Session.user_id == user_id, Message.content.like(keyword)),
-                    and_(Message.user_id == user_id, Message.content.like(keyword)),
+                and_(
+                    Message.content.like(keyword),
+                    or_(
+                        Session.user_id == user_id,
+                        Message.user_id == user_id,
+                    )
                 )
             )
-            .order_by(Session.updated_at.desc())
             .distinct()
-            .limit(20)
+            .limit(50)
         )
-        sessions = result.scalars().all()
 
+        for session_id, session in msg_result.all():
+            if session_id not in seen:
+                matched_sessions[session_id] = session
+                seen.add(session_id)
+
+        # 3. 构建结果
         items = []
-        for s in sessions:
-            # 获取匹配的消息预览
+        for s in list(matched_sessions.values())[:20]:
             msg_result = await db.execute(
                 select(Message)
                 .where(Message.session_id == s.id, Message.content.like(keyword))
