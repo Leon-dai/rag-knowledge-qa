@@ -5,6 +5,7 @@ import { SendOutlined, PlusOutlined, GlobalOutlined, DatabaseOutlined, MergeCell
 import { useChatStore } from '../stores/chatStore'
 import SessionSidebar from '../components/chat/SessionSidebar'
 import MessageBubble from '../components/chat/MessageBubble'
+import SearchModal from '../components/chat/SearchModal'
 
 const { Text } = Typography
 
@@ -21,6 +22,7 @@ export default function Chat() {
   const [sending, setSending] = useState(false)
   const [searchMode, setSearchMode] = useState<'local' | 'web' | 'mixed'>('mixed')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [searchModalOpen, setSearchModalOpen] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const {
@@ -101,6 +103,7 @@ export default function Chat() {
         <SessionSidebar
           collapsed={sidebarCollapsed}
           onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+          onSearch={() => setSearchModalOpen(true)}
         />
       </div>
 
@@ -140,10 +143,11 @@ export default function Chat() {
                 }}
               />
             </Tooltip>
-            <Tooltip title="搜索">
+            <Tooltip title="搜索对话">
               <Button
                 type="text"
                 icon={<SearchOutlined />}
+                onClick={() => setSearchModalOpen(true)}
                 style={{
                   width: 36,
                   height: 36,
@@ -334,6 +338,12 @@ export default function Chat() {
           </div>
         </div>
       </div>
+
+      {/* 搜索弹窗 */}
+      <SearchModal
+        open={searchModalOpen}
+        onClose={() => setSearchModalOpen(false)}
+      />
     </div>
   )
 }

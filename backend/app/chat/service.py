@@ -295,17 +295,15 @@ class ChatService:
         """搜索会话（标题 + 消息内容），使用 LIKE 模糊匹配"""
         keyword = f"%{query}%"
 
-        # 搜索消息内容 → 找到对应会话
+        # 搜索：用户拥有的会话中，标题或消息内容匹配
         result = await db.execute(
             select(Session)
-            .join(Message, Message.session_id == Session.id)
+            .outerjoin(Message, Message.session_id == Session.id)
             .where(
-                and_(
-                    Session.user_id == user_id,
-                    or_(
-                        Message.content.like(keyword),
-                        Session.title.like(keyword),
-                    )
+                or_(
+                    and_(Session.user_id == user_id, Session.title.like(keyword)),
+                    and_(Session.user_id == user_id, Message.content.like(keyword)),
+                    and_(Message.user_id == user_id, Message.content.like(keyword)),
                 )
             )
             .order_by(Session.updated_at.desc())

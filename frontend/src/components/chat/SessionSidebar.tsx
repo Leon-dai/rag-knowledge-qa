@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Button, Typography, Tooltip, Dropdown, Avatar, Input, message, Spin } from 'antd'
-import { PlusOutlined, MenuFoldOutlined, UserOutlined, LogoutOutlined, KeyOutlined, SettingOutlined, MoreOutlined, PushpinOutlined, ShareAltOutlined, DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined, SearchOutlined, ArrowLeftOutlined } from '@ant-design/icons'
+import { Button, Typography, Tooltip, Dropdown, Avatar, Input, message } from 'antd'
+import { PlusOutlined, MenuFoldOutlined, UserOutlined, LogoutOutlined, KeyOutlined, SettingOutlined, MoreOutlined, PushpinOutlined, ShareAltOutlined, DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined, SearchOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useChatStore } from '../../stores/chatStore'
 import { useAuthStore } from '../../stores/authStore'
-import { chatAPI } from '../../api/chat'
 import type { MenuProps } from 'antd'
 import dayjs from 'dayjs'
 
@@ -13,9 +12,10 @@ const { Text } = Typography
 interface Props {
   collapsed: boolean
   onToggle: () => void
+  onSearch: () => void
 }
 
-export default function SessionSidebar({ collapsed, onToggle }: Props) {
+export default function SessionSidebar({ collapsed, onToggle, onSearch }: Props) {
   const navigate = useNavigate()
   const { sessionId } = useParams<{ sessionId: string }>()
   const { sessions, createSession, deleteSession, renameSession } = useChatStore()
@@ -29,34 +29,6 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
   // 置顶会话列表
   const [pinnedIds, setPinnedIds] = useState<string[]>([])
 
-  // 搜索状态
-  const [searchOpen, setSearchOpen] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<any[] | null>(null)
-  const [searching, setSearching] = useState(false)
-
-  const handleSearch = async (q: string) => {
-    setSearchQuery(q)
-    if (!q.trim()) {
-      setSearchResults(null)
-      return
-    }
-    setSearching(true)
-    try {
-      const res = await chatAPI.searchSessions(q.trim())
-      setSearchResults(res.data.items || [])
-    } catch {
-      setSearchResults([])
-    } finally {
-      setSearching(false)
-    }
-  }
-
-  const handleCloseSearch = () => {
-    setSearchOpen(false)
-    setSearchQuery('')
-    setSearchResults(null)
-  }
 
   const handleCreate = async () => {
     // 如果已有空对话，直接切过去，不重复创建
@@ -163,70 +135,47 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
         height: 60,
         flexShrink: 0,
       }}>
-        {searchOpen ? (
-          <>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden' }}>
+          <div style={{
+            width: 28,
+            height: 28,
+            background: 'linear-gradient(135deg, #1677ff 0%, #0958d9 100%)',
+            borderRadius: 6,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#fff',
+            fontSize: 14,
+            flexShrink: 0,
+          }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+              <path d="M2 17l10 5 10-5"/>
+              <path d="M2 12l10 5 10-5"/>
+            </svg>
+          </div>
+          <Text strong style={{ fontSize: 16, color: '#1677ff', whiteSpace: 'nowrap' }}>AI 搜索</Text>
+        </div>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <Tooltip title="搜索对话">
             <Button
               type="text"
               size="small"
-              icon={<ArrowLeftOutlined />}
-              onClick={handleCloseSearch}
-              style={{ flexShrink: 0, marginRight: 8 }}
+              icon={<SearchOutlined />}
+              onClick={onSearch}
+              style={{ flexShrink: 0 }}
             />
-            <Input
-              placeholder="搜索对话..."
-              value={searchQuery}
-              onChange={(e) => handleSearch(e.target.value)}
-              autoFocus
-              style={{ flex: 1 }}
+          </Tooltip>
+          <Tooltip title="折叠侧边栏">
+            <Button
+              type="text"
               size="small"
-              allowClear
+              icon={<MenuFoldOutlined />}
+              onClick={onToggle}
+              style={{ flexShrink: 0 }}
             />
-          </>
-        ) : (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden' }}>
-              <div style={{
-                width: 28,
-                height: 28,
-                background: 'linear-gradient(135deg, #1677ff 0%, #0958d9 100%)',
-                borderRadius: 6,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#fff',
-                fontSize: 14,
-                flexShrink: 0,
-              }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                  <path d="M2 17l10 5 10-5"/>
-                  <path d="M2 12l10 5 10-5"/>
-                </svg>
-              </div>
-              <Text strong style={{ fontSize: 16, color: '#1677ff', whiteSpace: 'nowrap' }}>AI 搜索</Text>
-            </div>
-            <div style={{ display: 'flex', gap: 4 }}>
-              <Tooltip title="搜索">
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<SearchOutlined />}
-                  onClick={() => setSearchOpen(true)}
-                  style={{ flexShrink: 0 }}
-                />
-              </Tooltip>
-              <Tooltip title="折叠侧边栏">
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<MenuFoldOutlined />}
-                  onClick={onToggle}
-                  style={{ flexShrink: 0 }}
-                />
-              </Tooltip>
-            </div>
-          </>
-        )}
+          </Tooltip>
+        </div>
       </div>
 
       {/* 新建对话按钮 */}
@@ -242,54 +191,15 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
         </Button>
       </div>
 
-      {/* 搜索模式：显示搜索结果 */}
-      {searchOpen ? (
-        <div style={{ flex: 1, overflow: 'auto', padding: '12px 8px' }}>
-          {searching ? (
-            <Spin size="small" style={{ display: 'block', margin: '24px auto' }} />
-          ) : searchResults && searchResults.length === 0 ? (
-            <Text type="secondary" style={{ display: 'block', textAlign: 'center', padding: 24, fontSize: 13 }}>
-              未找到匹配的对话
-            </Text>
-          ) : searchResults && searchResults.length > 0 ? (
-            searchResults.map((item: any) => (
-              <div
-                key={item.id}
-                onClick={() => {
-                  handleCloseSearch()
-                  navigate(`/chat/${item.id}`)
-                }}
-                style={{
-                  padding: '10px 12px',
-                  marginBottom: 4,
-                  borderRadius: 8,
-                  cursor: 'pointer',
-                  background: sessionId === item.id ? '#e6f4ff' : 'transparent',
-                  transition: 'background 0.2s',
-                }}
-              >
-                <Text ellipsis style={{ fontSize: 13, fontWeight: 500 }}>
-                  {item.title}
-                </Text>
-                {item.match_preview && (
-                  <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
-                    ...{item.match_preview}...
-                  </Text>
-                )}
-              </div>
-            ))
-          ) : null}
-        </div>
-      ) : (
-        /* 正常模式：显示会话列表 */
-        <div style={{
-          flex: 1,
-          overflow: 'auto',
-          padding: '0 8px',
-          position: 'relative',
-        }}>
-          {/* 置顶组 */}
-          {pinnedSessions.length > 0 && (
+      {/* 正常模式：显示会话列表 */}
+      <div style={{
+        flex: 1,
+        overflow: 'auto',
+        padding: '0 8px',
+        position: 'relative',
+      }}>
+        {/* 置顶组 */}
+        {pinnedSessions.length > 0 && (
           <>
             <Text type="secondary" style={{ fontSize: 11, padding: '8px 8px 4px', display: 'block' }}>置顶</Text>
             <SessionList
@@ -373,7 +283,6 @@ export default function SessionSidebar({ collapsed, onToggle }: Props) {
           pointerEvents: 'none',
         }} />
       </div>
-      )}
 
       {/* 底部用户信息 - 可点击 */}
       {user && (
