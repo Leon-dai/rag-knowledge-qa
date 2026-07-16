@@ -51,9 +51,12 @@ export default function SearchModal({ open, onClose }: Props) {
     }
   }
 
-  const handleSelect = (sessionId: string) => {
+  const handleSelect = (sessionId: string, messageId?: string) => {
     onClose()
-    navigate(`/chat/${sessionId}`)
+    // 延时跳转确保关闭动画完成
+    setTimeout(() => {
+      navigate(`/chat/${sessionId}${messageId ? `?msg=${messageId}` : ''}`)
+    }, 100)
   }
 
   if (!open) return null
@@ -116,7 +119,7 @@ export default function SearchModal({ open, onClose }: Props) {
             results.map((item: any) => (
               <div
                 key={item.id}
-                onClick={() => handleSelect(item.id)}
+                onClick={() => handleSelect(item.id, item.match_message_id)}
                 style={{
                   padding: '12px 16px',
                   borderRadius: 8,

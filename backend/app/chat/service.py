@@ -339,12 +339,14 @@ class ChatService:
             )
             first_match = msg_result.scalar_one_or_none()
 
+            first_msg_id = first_match.id if first_match else None
             items.append({
                 "id": s.id,
                 "title": s.title,
                 "message_count": s.message_count,
                 "updated_at": str(s.updated_at),
                 "match_preview": _highlight_match(first_match.content, query) if first_match else None,
+                "match_message_id": first_msg_id,
             })
 
         return {"items": items, "total": len(items), "query": query}

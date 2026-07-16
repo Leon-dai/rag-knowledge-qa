@@ -46,11 +46,12 @@ export default function MessageBubble({ message, isStreaming }: Props) {
 
   // AI 回复：无气泡，纯文本 + 头像，左对齐（ChatGPT 风格）
   return (
-    <div style={{
+    <div id={`msg-${message.id}`} style={{
       display: 'flex',
       gap: 12,
       marginBottom: 24,
       alignItems: 'flex-start',
+      transition: 'background 0.5s',
     }}>
       <Avatar icon={<RobotOutlined />} style={{ backgroundColor: '#52c41a', flexShrink: 0 }} />
       <div style={{ flex: 1, maxWidth: '85%' }}>

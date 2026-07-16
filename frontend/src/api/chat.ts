@@ -23,5 +23,5 @@ export const chatAPI = {
     }),
 
   searchSessions: (q: string) =>
-    client.get('/sessions/search', { params: { q } }),
+    client.get('/search', { params: { q } }),
 }
