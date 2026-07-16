@@ -243,6 +243,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       sessions: state.sessions.map((s) =>
         s.id === sessionId ? { ...s, title } : s
       ),
+      currentSession: state.currentSession?.id === sessionId
+        ? { ...state.currentSession, title }
+        : state.currentSession,
     }))
   },
 }))
