@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { Input, Button, Empty, Typography, message, Skeleton, Tooltip } from 'antd'
 import { SendOutlined, PlusOutlined, GlobalOutlined, DatabaseOutlined, MergeCellsOutlined, MenuUnfoldOutlined, SearchOutlined, PlusCircleOutlined } from '@ant-design/icons'
 import { useChatStore } from '../stores/chatStore'
@@ -23,9 +23,7 @@ export default function Chat() {
   const [searchMode, setSearchMode] = useState<'local' | 'web' | 'mixed'>('mixed')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [searchModalOpen, setSearchModalOpen] = useState(false)
-  const [searchParams, setSearchParams] = useSearchParams()
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const targetMsgScrolled = useRef(false)
 
   const {
     currentSession,
@@ -51,24 +49,6 @@ export default function Chat() {
       fetchMessages(sessionId)
     }
   }, [sessionId, selectSession, fetchMessages])
-
-  // 跳转到搜索匹配的消息
-  useEffect(() => {
-    const targetMsg = searchParams.get('msg')
-    if (!targetMsg || messages.length === 0 || targetMsgScrolled.current) return
-    // 等待 DOM 渲染
-    setTimeout(() => {
-      const el = document.getElementById(`msg-${targetMsg}`)
-      if (el) {
-        el.scrollIntoView({ block: 'center', behavior: 'smooth' })
-        el.style.background = '#fffbe6'
-        setTimeout(() => { el.style.background = '' }, 2000)
-        targetMsgScrolled.current = true
-        // 清除 URL 参数
-        setSearchParams({}, { replace: true })
-      }
-    }, 300)
-  }, [messages, searchParams])
 
   useEffect(() => {
     if (!isStreaming) return

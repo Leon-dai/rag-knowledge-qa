@@ -16,7 +16,6 @@ from app.chat.schemas import (
     MessageListResponse,
 )
 from app.rag.service import RAGService
-from app.logging import logger
 
 
 def count_tokens(text: str) -> int:
@@ -292,81 +291,56 @@ class ChatService:
 
     @staticmethod
     async def search(db: AsyncSession, user_id: str, query: str) -> dict:
-        """搜索会话（标题 + 消息内容），使用 LIKE 模糊匹配"""
+        """搜索会话（标题 + 消息内容）"""
         keyword = f"%{query}%"
         seen = set()
 
-        # 1. 搜索标题匹配的会话
+        # 1. 标题匹配的会话
         session_result = await db.execute(
             select(Session).where(
                 and_(Session.user_id == user_id, Session.title.like(keyword))
             ).order_by(Session.updated_at.desc()).limit(20)
         )
-        matched_sessions = {s.id: s for s in session_result.scalars().all()}
-        for sid in matched_sessions:
-            seen.add(sid)
+        matched = {s.id: s for s in session_result.scalars().all()}
+        seen.update(matched.keys())
 
-        # 2. 搜索消息内容匹配 → 找到对应会话
+        # 2. 消息内容匹配的会话
         msg_result = await db.execute(
             select(Message.session_id, Session)
             .join(Session, Session.id == Message.session_id)
             .where(
                 and_(
                     Message.content.like(keyword),
-                    or_(
-                        Session.user_id == user_id,
-                        Message.user_id == user_id,
-                    )
+                    or_(Session.user_id == user_id, Message.user_id == user_id),
                 )
-            )
-            .distinct()
-            .limit(50)
+            ).distinct().limit(50)
         )
-
-        for session_id, session in msg_result.all():
-            if session_id not in seen:
-                matched_sessions[session_id] = session
-                seen.add(session_id)
+        for sid, s in msg_result.all():
+            if sid not in seen:
+                matched[sid] = s
+                seen.add(sid)
 
         # 3. 构建结果
         items = []
-        for s in list(matched_sessions.values())[:20]:
-            msg_result = await db.execute(
-                select(Message)
-                .where(Message.session_id == s.id, Message.content.like(keyword))
-                .order_by(Message.created_at.asc())
-                .limit(1)
+        for s in list(matched.values())[:20]:
+            match_msg = await db.execute(
+                select(Message).where(
+                    Message.session_id == s.id, Message.content.like(keyword)
+                ).order_by(Message.created_at.asc()).limit(1)
             )
-            first_match = msg_result.scalar_one_or_none()
-
-            first_msg_id = first_match.id if first_match else None
+            first_hit = match_msg.scalar_one_or_none()
             items.append({
                 "id": s.id,
                 "title": s.title,
                 "message_count": s.message_count,
                 "updated_at": str(s.updated_at),
-                "match_preview": _highlight_match(first_match.content, query) if first_match else None,
-                "match_message_id": first_msg_id,
+                "match_preview": _hilight(first_hit.content, query) if first_hit else None,
+                "match_message_id": first_hit.id if first_hit else None,
             })
 
         return {"items": items, "total": len(items), "query": query}
 
-
-def _highlight_match(text: str, query: str, context_len: int = 40) -> str:
-    """提取匹配关键词周围的上下文"""
-    idx = text.lower().find(query.lower())
-    if idx == -1:
-        return text[:80] + ("..." if len(text) > 80 else "")
-
-    start = max(0, idx - context_len)
-    end = min(len(text), idx + len(query) + context_len)
-    preview = ""
-    if start > 0:
-        preview += "..."
-    preview += text[start:end]
-    if end < len(text):
-        preview += "..."
-    return preview
+    # ==================== 工具方法 ====================
 
     @staticmethod
     async def _get_session_or_404(db: AsyncSession, session_id: str, user_id: str) -> Session:
@@ -383,3 +357,13 @@ def _highlight_match(text: str, query: str, context_len: int = 40) -> str:
                 detail="会话不存在",
             )
         return session
+
+
+def _hilight(text: str, query: str, ctx: int = 40) -> str:
+    """提取关键词周围上下文"""
+    i = text.lower().find(query.lower())
+    if i == -1:
+        return text[:80] + ("..." if len(text) > 80 else "")
+    s = max(0, i - ctx)
+    e = min(len(text), i + len(query) + ctx)
+    return ("..." if s > 0 else "") + text[s:e] + ("..." if e < len(text) else "")
