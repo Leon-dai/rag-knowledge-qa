@@ -356,14 +356,22 @@ class DocumentService:
 
     @staticmethod
     async def get_dashboard(db: AsyncSession) -> dict:
-        """知识库仪表盘：按分类分组"""
+        """知识库仪表盘：返回全量文档（含状态）和分类统计"""
         result = await db.execute(
-            select(Document).where(Document.status == "ready")
+            select(Document).order_by(Document.created_at.desc())
         )
-        docs = result.scalars().all()
+        all_docs = result.scalars().all()
 
+        # 状态统计
+        status_counts = {"total": len(all_docs), "ready": 0, "processing": 0, "error": 0, "uploaded": 0}
+        for doc in all_docs:
+            if doc.status in status_counts:
+                status_counts[doc.status] += 1
+
+        # 已就绪文档按分类分组
+        ready_docs = [d for d in all_docs if d.status == "ready"]
         categories: dict[str, list] = {}
-        for doc in docs:
+        for doc in ready_docs:
             cat = doc.category or "未分类"
             if cat not in categories:
                 categories[cat] = []
@@ -371,17 +379,39 @@ class DocumentService:
                 "id": doc.id,
                 "original_filename": doc.original_filename,
                 "file_type": doc.file_type,
+                "file_size": doc.file_size,
+                "chunk_count": doc.chunk_count,
                 "summary": doc.summary,
                 "tags": _parse_tags(doc.tags),
                 "created_at": str(doc.created_at) if doc.created_at else "",
             })
 
+        # 完整文档列表
+        items = [
+            {
+                "id": doc.id,
+                "original_filename": doc.original_filename,
+                "file_type": doc.file_type,
+                "file_size": doc.file_size,
+                "status": doc.status,
+                "error_message": doc.error_message,
+                "chunk_count": doc.chunk_count,
+                "category": doc.category,
+                "tags": _parse_tags(doc.tags),
+                "summary": doc.summary,
+                "created_at": str(doc.created_at) if doc.created_at else "",
+            }
+            for doc in all_docs
+        ]
+
         return {
-            "total": len(docs),
+            "total": len(all_docs),
+            "status_counts": status_counts,
             "categories": [
                 {"name": cat, "count": len(items), "items": items}
                 for cat, items in sorted(categories.items(), key=lambda x: -len(x[1]))
             ],
+            "items": items,
         }
 
     @staticmethod

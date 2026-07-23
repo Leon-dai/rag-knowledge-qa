@@ -26,12 +26,7 @@ export default function AdminLayout() {
     {
       key: '/admin/kb-dashboard',
       icon: <AppstoreOutlined />,
-      label: '知识库全景',
-    },
-    {
-      key: '/admin/documents',
-      icon: <FileTextOutlined />,
-      label: '知识库管理',
+      label: '知识库',
     },
     {
       key: '/admin/users',

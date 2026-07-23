@@ -1,10 +1,15 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import { Tag, Typography, Spin, Button, message, Tooltip, Modal, Input, Skeleton } from 'antd'
 import {
-  TagsOutlined, ReloadOutlined, RightOutlined, EditOutlined, DownloadOutlined,
-  SearchOutlined, ClearOutlined, FilePdfOutlined, FileTextOutlined,
+  Tag, Typography, Spin, Button, message, Tooltip, Modal, Input, Skeleton,
+  Upload, Popconfirm, Space,
+} from 'antd'
+import {
+  UploadOutlined, TagsOutlined, ReloadOutlined, EditOutlined, DownloadOutlined,
+  DeleteOutlined, SearchOutlined, ClearOutlined,
+  SyncOutlined, FilePdfOutlined, FileTextOutlined,
   FileExcelOutlined, FileOutlined,
 } from '@ant-design/icons'
+import type { UploadProps } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import { docsAPI } from '../../api/docs'
 import dayjs from 'dayjs'
@@ -24,6 +29,13 @@ const fileTypeIcon: Record<string, React.ReactNode> = {
   csv: <FileExcelOutlined style={{ color: '#16a34a', fontSize: 13 }} />,
   xlsx: <FileExcelOutlined style={{ color: '#16a34a', fontSize: 13 }} />,
   xls: <FileExcelOutlined style={{ color: '#16a34a', fontSize: 13 }} />,
+}
+
+const statusTag: Record<string, { color: string; text: string }> = {
+  uploaded: { color: 'default', text: '待处理' },
+  processing: { color: 'processing', text: '处理中' },
+  ready: { color: 'success', text: '就绪' },
+  error: { color: 'error', text: '失败' },
 }
 
 function getCategoryColor(name: string): string {
@@ -48,30 +60,25 @@ function getCategoryBg(name: string): string {
    Types
    ============================================================ */
 
-interface DashboardData {
-  total: number
-  categories: Array<{
-    name: string
-    count: number
-    items: Array<{
-      id: string
-      original_filename: string
-      file_type: string
-      summary: string | null
-      tags: string[] | null
-      created_at: string
-    }>
-  }>
-}
-
 interface DocItem {
   id: string
   original_filename: string
   file_type: string
-  summary: string | null
+  file_size: number
+  status: string
+  error_message: string | null
+  chunk_count: number
+  category: string | null
   tags: string[] | null
+  summary: string | null
   created_at: string
-  categoryName: string
+}
+
+interface DashboardData {
+  total: number
+  status_counts: { total: number; ready: number; processing: number; error: number; uploaded: number }
+  categories: Array<{ name: string; count: number; items: DocItem[] }>
+  items: DocItem[]
 }
 
 /* ============================================================
@@ -86,6 +93,7 @@ function KnowledgeSpectrum({
   selected: string | null
   onSelect: (name: string | null) => void
 }) {
+  if (categories.length === 0) return null
   return (
     <div>
       <div style={{
@@ -100,7 +108,7 @@ function KnowledgeSpectrum({
           for (let i = 0; i < cat.name.length; i++) h = cat.name.charCodeAt(i) + ((h << 5) - h)
           const hue = ((Math.abs(h) % 360) + 360) % 360
           return (
-            <Tooltip key={cat.name} title={`${cat.name} · ${cat.count} 篇 (${Math.round(fraction * 100)}%)`}>
+            <Tooltip key={cat.name} title={`${cat.name} · ${cat.count} 篇`}>
               <div
                 style={{
                   flex: Math.max(fraction, 0.06), height: '100%',
@@ -128,14 +136,13 @@ function KnowledgeSpectrum({
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, padding: '0 2px' }}>
         {categories.map((c) => {
-          const pct = Math.round((c.count / total) * 100)
           const isActive = selected === c.name
           return (
             <Text key={c.name} style={{
               fontSize: 11, color: isActive ? '#1a1a2e' : '#6b7280',
               textAlign: 'center', flex: 1, fontWeight: isActive ? 600 : 400,
             }}>
-              {c.count} 篇 · {pct}%
+              {c.count} 篇
             </Text>
           )
         })}
@@ -155,6 +162,7 @@ export default function KBDashboard() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [reclassifying, setReclassifying] = useState(false)
+  const [uploading, setUploading] = useState(false)
 
   /* ---- filters ---- */
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
@@ -188,7 +196,18 @@ export default function KBDashboard() {
 
   useEffect(() => { fetchDashboard() }, [fetchDashboard])
 
-  /* ---- auto-refresh on visibility change ---- */
+  /* ---- auto-refresh ---- */
+  const hasProcessing = useMemo(() => {
+    if (!dashboard) return false
+    return dashboard.items.some((d) => d.status === 'processing' || d.status === 'uploaded')
+  }, [dashboard])
+
+  useEffect(() => {
+    const interval = hasProcessing ? 3000 : 15000
+    const timer = setInterval(() => fetchDashboard(), interval)
+    return () => clearInterval(timer)
+  }, [hasProcessing, fetchDashboard])
+
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState === 'visible') fetchDashboard()
@@ -199,60 +218,47 @@ export default function KBDashboard() {
 
   /* ---- derived data ---- */
 
-  const { total, categories, allDocs, allTags, stats, tagFrequency } = useMemo(() => {
-    if (!dashboard) return { total: 0, categories: [], allDocs: [], allTags: [], stats: [], tagFrequency: {} as Record<string, number> }
-    const cats = dashboard.categories
-    const docs = cats.flatMap((c) => c.items.map((doc) => ({ ...doc, categoryName: c.name })))
-
-    // 统计标签频率
+  const { total, categories, items, allTags, tagFrequency, stats } = useMemo(() => {
+    if (!dashboard) return { total: 0, categories: [], items: [], allTags: [], tagFrequency: {} as Record<string, number>, stats: [] }
+    const sc = dashboard.status_counts
     const freq: Record<string, number> = {}
-    docs.forEach((d) => d.tags?.forEach((t) => { freq[t] = (freq[t] || 0) + 1 }))
+    dashboard.items.forEach((d) => d.tags?.forEach((t) => { freq[t] = (freq[t] || 0) + 1 }))
     const sortedTags = Object.entries(freq).sort((a, b) => b[1] - a[1]).map(([t]) => t)
-
-    const sorted = [...docs].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-
     return {
       total: dashboard.total,
-      categories: cats,
-      allDocs: docs,
+      categories: dashboard.categories,
+      items: dashboard.items,
       allTags: sortedTags,
-      stats: [
-        { label: '文档总数', value: dashboard.total },
-        { label: '分类数量', value: cats.length },
-        { label: '标签总数', value: sortedTags.length },
-        { label: '最近更新', value: sorted.length > 0 ? dayjs(sorted[0].created_at).format('MM-DD') : '-' },
-      ],
       tagFrequency: freq,
+      stats: [
+        { label: '文档总数', value: sc.total },
+        { label: '就绪', value: sc.ready },
+        { label: '处理中', value: sc.processing + sc.uploaded },
+        { label: '失败', value: sc.error },
+      ],
     }
   }, [dashboard])
 
   /* ---- filter logic ---- */
 
   const filteredDocs = useMemo(() => {
-    let result = allDocs
-
-    // 搜索：文档名、分类、标签
+    let result = items
     if (searchText.trim()) {
       const q = searchText.trim().toLowerCase()
       result = result.filter((d) =>
         d.original_filename.toLowerCase().includes(q) ||
-        d.categoryName.toLowerCase().includes(q) ||
+        (d.category && d.category.toLowerCase().includes(q)) ||
         (d.tags && d.tags.some((t) => t.toLowerCase().includes(q)))
       )
     }
-
-    // 按分类筛选
     if (selectedCategory) {
-      result = result.filter((d) => d.categoryName === selectedCategory)
+      result = result.filter((d) => d.category === selectedCategory)
     }
-
-    // 按标签筛选（多选，满足任一）
     if (selectedTags.size > 0) {
       result = result.filter((d) => d.tags && d.tags.some((t) => selectedTags.has(t)))
     }
-
-    return [...result].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-  }, [allDocs, searchText, selectedCategory, selectedTags])
+    return result
+  }, [items, searchText, selectedCategory, selectedTags])
 
   /* ---- handlers ---- */
 
@@ -310,7 +316,7 @@ export default function KBDashboard() {
   const handleReclassify = useCallback(async () => {
     setReclassifying(true)
     try {
-      const res = await docsAPI.reclassify()
+      await docsAPI.reclassify()
       message.success('分类已更新')
       fetchDashboard()
     } catch (err: any) {
@@ -321,8 +327,48 @@ export default function KBDashboard() {
     }
   }, [fetchDashboard])
 
-  const hasFilter = selectedCategory !== null || selectedTags.size > 0 || searchText.trim().length > 0
+  const handleDelete = useCallback(async (id: string, name: string) => {
+    try {
+      await docsAPI.delete(id)
+      message.success(`"${name}" 已删除`)
+      fetchDashboard()
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail
+      message.error(typeof detail === 'string' ? detail : '删除失败')
+    }
+  }, [fetchDashboard])
 
+  const handleReprocess = useCallback(async (id: string) => {
+    try {
+      await docsAPI.reprocess(id)
+      message.success('已加入重新处理队列')
+      fetchDashboard()
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail
+      message.error(typeof detail === 'string' ? detail : '重试失败')
+    }
+  }, [fetchDashboard])
+
+  const uploadProps: UploadProps = {
+    accept: '.pdf,.docx,.doc,.txt,.md,.csv,.xlsx,.xls',
+    showUploadList: false,
+    beforeUpload: async (file) => {
+      setUploading(true)
+      try {
+        await docsAPI.upload(file)
+        message.success(`"${file.name}" 上传成功`)
+        fetchDashboard()
+      } catch (err: any) {
+        const detail = err?.response?.data?.detail
+        message.error(typeof detail === 'string' ? detail : '上传失败')
+      } finally {
+        setUploading(false)
+      }
+      return false
+    },
+  }
+
+  const hasFilter = selectedCategory !== null || selectedTags.size > 0 || searchText.trim().length > 0
   const visibleTags = showAllTags ? allTags : allTags.slice(0, TAG_SHOW_LIMIT)
   const hiddenCount = allTags.length - TAG_SHOW_LIMIT
 
@@ -332,40 +378,40 @@ export default function KBDashboard() {
     return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}><Spin /></div>
   }
 
-  if (!dashboard || dashboard.total === 0) {
-    return (
-      <div style={{ padding: 60, textAlign: 'center' }}>
-        <Text style={{ color: '#6b7280', fontSize: 15 }}>
-          暂无文档。去 <Text style={{ color: '#d97706', cursor: 'pointer' }} onClick={() => navigate('/admin/documents')}>知识库管理</Text> 上传文档
-        </Text>
-      </div>
-    )
-  }
-
   return (
     <div style={{ background: '#f8f6f3', minHeight: 'calc(100vh - 140px)' }}>
       <div style={{ maxWidth: 960, margin: '0 auto', padding: '32px 0' }}>
         {/* ================================================================
-            标题
+            标题 + 上传
              ================================================================ */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
           <div>
-            <Text style={{ fontSize: 24, fontWeight: 700, color: '#1a1a2e', letterSpacing: '-0.5px' }}>知识库全景</Text>
+            <Text style={{ fontSize: 24, fontWeight: 700, color: '#1a1a2e', letterSpacing: '-0.5px' }}>知识库</Text>
             <div style={{ marginTop: 4 }}>
-              <Text style={{ fontSize: 13, color: '#6b7280' }}>{total} 份文档 · {categories.length} 个分类 · {allTags.length} 个标签</Text>
+              <Text style={{ fontSize: 13, color: '#6b7280' }}>
+                {total} 份文档 · {categories.length} 个分类 · {allTags.length} 个标签
+              </Text>
             </div>
           </div>
-          <Button size="small" icon={<TagsOutlined />} loading={reclassifying} onClick={handleReclassify}
-            style={{ fontSize: 13, borderColor: '#d1d5db', color: '#1a1a2e' }}>AI 重新分类</Button>
+          <Space>
+            <Button size="small" icon={<TagsOutlined />} loading={reclassifying} onClick={handleReclassify}
+              style={{ fontSize: 13, borderColor: '#d1d5db', color: '#1a1a2e' }}>AI 重新分类</Button>
+            <Upload {...uploadProps}>
+              <Button type="primary" size="small" icon={<UploadOutlined />} loading={uploading}
+                style={{ fontSize: 13 }}>上传文档</Button>
+            </Upload>
+          </Space>
         </div>
 
         {/* ================================================================
             Knowledge Spectrum
              ================================================================ */}
-        <div style={{ marginBottom: 20 }}>
-          <KnowledgeSpectrum categories={categories.map((c) => ({ name: c.name, count: c.count }))} total={total}
-            selected={selectedCategory} onSelect={setSelectedCategory} />
-        </div>
+        {categories.length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <KnowledgeSpectrum categories={categories.map((c) => ({ name: c.name, count: c.count }))} total={categories.reduce((s, c) => s + c.count, 0)}
+              selected={selectedCategory} onSelect={setSelectedCategory} />
+          </div>
+        )}
 
         {/* ================================================================
             统计卡片
@@ -400,40 +446,42 @@ export default function KBDashboard() {
         </div>
 
         {/* ================================================================
-            分类筛选条
+            分类筛选
              ================================================================ */}
-        <div style={{ marginBottom: 10 }}>
-          <Text style={{ fontSize: 12, color: '#6b7280', marginRight: 8 }}>分类</Text>
-          <span style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap' }}>
-            <span onClick={() => setSelectedCategory(null)}
-              style={{
-                fontSize: 12, padding: '2px 10px', borderRadius: 12, cursor: 'pointer', lineHeight: '22px',
-                background: !selectedCategory ? '#1a1a2e' : '#e5e7eb',
-                color: !selectedCategory ? '#fff' : '#6b7280',
-              }}>
-              全部 {total}
+        {categories.length > 0 && (
+          <div style={{ marginBottom: 10 }}>
+            <Text style={{ fontSize: 12, color: '#6b7280', marginRight: 8 }}>分类</Text>
+            <span style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap' }}>
+              <span onClick={() => setSelectedCategory(null)}
+                style={{
+                  fontSize: 12, padding: '2px 10px', borderRadius: 12, cursor: 'pointer', lineHeight: '22px',
+                  background: !selectedCategory ? '#1a1a2e' : '#e5e7eb',
+                  color: !selectedCategory ? '#fff' : '#6b7280',
+                }}>
+                全部
+              </span>
+              {categories.map((c) => {
+                const isActive = selectedCategory === c.name
+                const color = getCategoryColor(c.name)
+                return (
+                  <span key={c.name} onClick={() => setSelectedCategory(isActive ? null : c.name)}
+                    style={{
+                      fontSize: 12, padding: '2px 10px', borderRadius: 12, cursor: 'pointer', lineHeight: '22px',
+                      background: isActive ? color : getCategoryBg(c.name),
+                      color: isActive ? '#fff' : color, fontWeight: isActive ? 600 : 400,
+                    }}>
+                    {c.name} {c.count}
+                  </span>
+                )
+              })}
             </span>
-            {categories.map((c) => {
-              const isActive = selectedCategory === c.name
-              const color = getCategoryColor(c.name)
-              return (
-                <span key={c.name} onClick={() => setSelectedCategory(isActive ? null : c.name)}
-                  style={{
-                    fontSize: 12, padding: '2px 10px', borderRadius: 12, cursor: 'pointer', lineHeight: '22px',
-                    background: isActive ? color : getCategoryBg(c.name),
-                    color: isActive ? '#fff' : color, fontWeight: isActive ? 600 : 400,
-                  }}>
-                  {c.name} {c.count}
-                </span>
-              )
-            })}
-          </span>
-        </div>
+          </div>
+        )}
 
         {/* ================================================================
-            标签筛选条（折叠）
+            标签筛选（折叠）
              ================================================================ */}
-        {allTags.length > 0 && (
+        {visibleTags.length > 0 && (
           <div style={{ marginBottom: 16 }}>
             <Text style={{ fontSize: 12, color: '#6b7280', marginRight: 8 }}>标签</Text>
             <span style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -445,7 +493,6 @@ export default function KBDashboard() {
                       fontSize: 11, padding: '1px 8px', borderRadius: 10, cursor: 'pointer', lineHeight: '20px',
                       background: isActive ? '#d97706' : '#f3f4f6',
                       color: isActive ? '#fff' : '#6b7280', fontWeight: isActive ? 500 : 400,
-                      transition: 'all 0.15s',
                     }}>
                     {tag}
                   </span>
@@ -495,76 +542,94 @@ export default function KBDashboard() {
             <Text style={{ fontSize: 15, fontWeight: 600, color: '#1a1a2e' }}>
               {hasFilter ? '筛选结果' : '全部文档'}
             </Text>
-            <Text style={{ fontSize: 13, color: '#d97706', cursor: 'pointer' }} onClick={() => navigate('/admin/documents')}>
-              管理全部 <RightOutlined style={{ fontSize: 10 }} />
-            </Text>
           </div>
 
           {filteredDocs.length === 0 ? (
             <div style={{ padding: '32px 16px', textAlign: 'center' }}>
-              <Text style={{ color: '#6b7280', fontSize: 13 }}>没有匹配的文档</Text>
+              <Text style={{ color: '#6b7280', fontSize: 13 }}>暂无文档，点击右上角上传</Text>
             </div>
           ) : (
-            filteredDocs.map((doc, i) => (
-              <div key={doc.id} style={{
-                display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px',
-                borderBottom: i < filteredDocs.length - 1 ? '1px solid #f3f0eb' : 'none',
-              }}>
-                <span style={{ flexShrink: 0, width: 16, textAlign: 'center' }}>
-                  {fileTypeIcon[doc.file_type] || <FileOutlined style={{ fontSize: 13 }} />}
-                </span>
-
-                <Text
-                  style={{
-                    flex: 1, minWidth: 0, fontSize: 13, color: '#2563eb',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    cursor: 'pointer',
-                  }}
-                  title={doc.original_filename}
-                  onClick={() => openPreview(doc.id, doc.original_filename)}
-                >
-                  {doc.original_filename}
-                </Text>
-
-                <span style={{
-                  flexShrink: 0, fontSize: 11, padding: '0 8px', borderRadius: 10, lineHeight: '20px',
-                  color: getCategoryColor(doc.categoryName), background: getCategoryBg(doc.categoryName),
-                  marginRight: 4,
+            filteredDocs.map((doc, i) => {
+              const isReady = doc.status === 'ready'
+              const st = statusTag[doc.status] || { color: 'default', text: doc.status }
+              return (
+                <div key={doc.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px',
+                  borderBottom: i < filteredDocs.length - 1 ? '1px solid #f3f0eb' : 'none',
                 }}>
-                  {doc.categoryName}
-                </span>
-
-                {doc.tags && doc.tags.length > 0 && (
-                  <span style={{ flexShrink: 0, display: 'flex', gap: 4, maxWidth: 160, overflow: 'hidden' }}>
-                    {doc.tags.slice(0, 2).map((t) => (
-                      <span key={t} style={{
-                        fontSize: 11, color: '#6b7280', background: '#f3f4f6',
-                        padding: '0 6px', borderRadius: 4, whiteSpace: 'nowrap',
-                      }}>{t}</span>
-                    ))}
-                    {doc.tags.length > 2 && <span style={{ fontSize: 11, color: '#9ca3af' }}>+{doc.tags.length - 2}</span>}
+                  {/* 图标 */}
+                  <span style={{ flexShrink: 0, width: 16, textAlign: 'center' }}>
+                    {fileTypeIcon[doc.file_type] || <FileOutlined style={{ fontSize: 13 }} />}
                   </span>
-                )}
 
-                <Text style={{ flexShrink: 0, fontSize: 11, color: '#9ca3af', width: 44, textAlign: 'right' }}>
-                  {dayjs(doc.created_at).format('MM-DD')}
-                </Text>
+                  {/* 文件名 */}
+                  <Text
+                    style={{
+                      flex: 1, minWidth: 0, fontSize: 13,
+                      color: isReady ? '#2563eb' : '#6b7280',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      cursor: isReady ? 'pointer' : 'default',
+                    }}
+                    title={doc.original_filename}
+                    onClick={() => isReady && openPreview(doc.id, doc.original_filename)}
+                  >
+                    {doc.original_filename}
+                  </Text>
 
-                <Button type="text" size="small" icon={<DownloadOutlined style={{ fontSize: 11, color: '#9ca3af' }} />}
-                  style={{ flexShrink: 0, width: 20, height: 20 }}
-                  onClick={() => docsAPI.download(doc.id, doc.original_filename)} />
+                  {/* 分类 */}
+                  {doc.category && isReady ? (
+                    <span style={{
+                      flexShrink: 0, fontSize: 11, padding: '0 8px', borderRadius: 10, lineHeight: '20px',
+                      color: getCategoryColor(doc.category), background: getCategoryBg(doc.category),
+                    }}>
+                      {doc.category}
+                    </span>
+                  ) : (
+                    <span style={{ flexShrink: 0, fontSize: 11, color: '#9ca3af', width: 48, textAlign: 'center' }}>-</span>
+                  )}
 
-                <Button type="text" size="small" icon={<EditOutlined style={{ fontSize: 11, color: '#9ca3af' }} />}
-                  style={{ flexShrink: 0, width: 20, height: 20 }}
-                  onClick={() => setEditingDoc({
-                    id: doc.id,
-                    original_filename: doc.original_filename,
-                    category: doc.categoryName,
-                    tags: (doc.tags || []).join(', '),
-                    summary: doc.summary || '',
-                  })} />
-              </div>
-            ))
+                  {/* 状态 */}
+                  <Tag color={st.color} style={{ flexShrink: 0, fontSize: 11, lineHeight: '20px', margin: 0 }}
+                    icon={doc.status === 'processing' ? <SyncOutlined spin /> : undefined}>
+                    {st.text}
+                  </Tag>
+
+                  {/* 日期 */}
+                  <Text style={{ flexShrink: 0, fontSize: 11, color: '#9ca3af', width: 44, textAlign: 'right' }}>
+                    {dayjs(doc.created_at).format('MM-DD')}
+                  </Text>
+
+                  {/* 操作 */}
+                  <span style={{ flexShrink: 0, display: 'flex', gap: 0 }}>
+                    {isReady && (
+                      <>
+                        <Button type="text" size="small" icon={<DownloadOutlined style={{ fontSize: 11, color: '#9ca3af' }} />}
+                          style={{ width: 20, height: 20 }}
+                          onClick={() => docsAPI.download(doc.id, doc.original_filename)} />
+                        <Button type="text" size="small" icon={<EditOutlined style={{ fontSize: 11, color: '#9ca3af' }} />}
+                          style={{ width: 20, height: 20 }}
+                          onClick={() => setEditingDoc({
+                            id: doc.id,
+                            original_filename: doc.original_filename,
+                            category: doc.category || '',
+                            tags: (doc.tags || []).join(', '),
+                            summary: doc.summary || '',
+                          })} />
+                      </>
+                    )}
+                    {doc.status === 'error' && (
+                      <Button type="text" size="small" icon={<ReloadOutlined style={{ fontSize: 11, color: '#d97706' }} />}
+                        style={{ width: 20, height: 20 }}
+                        onClick={() => handleReprocess(doc.id)} />
+                    )}
+                    <Popconfirm title="确定删除此文档？" onConfirm={() => handleDelete(doc.id, doc.original_filename)}>
+                      <Button type="text" size="small" icon={<DeleteOutlined style={{ fontSize: 11, color: '#9ca3af' }} />}
+                        style={{ width: 20, height: 20 }} />
+                    </Popconfirm>
+                  </span>
+                </div>
+              )
+            })
           )}
         </div>
       </div>
@@ -600,36 +665,25 @@ export default function KBDashboard() {
         {editingDoc && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div>
-              <Text style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', display: 'block', marginBottom: 4 }}>
-                文件名
-              </Text>
+              <Text style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', display: 'block', marginBottom: 4 }}>文件名</Text>
               <Input value={editingDoc.original_filename}
-                onChange={(e) => setEditingDoc({ ...editingDoc, original_filename: e.target.value })}
-                placeholder="文档名称" />
+                onChange={(e) => setEditingDoc({ ...editingDoc, original_filename: e.target.value })} />
             </div>
             <div>
-              <Text style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', display: 'block', marginBottom: 4 }}>
-                分类
-              </Text>
+              <Text style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', display: 'block', marginBottom: 4 }}>分类</Text>
               <Input value={editingDoc.category}
-                onChange={(e) => setEditingDoc({ ...editingDoc, category: e.target.value })}
-                placeholder="输入分类名称，如：个人简历、学术论文..." />
+                onChange={(e) => setEditingDoc({ ...editingDoc, category: e.target.value })} />
             </div>
             <div>
-              <Text style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', display: 'block', marginBottom: 4 }}>
-                标签（用逗号分隔）
-              </Text>
+              <Text style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', display: 'block', marginBottom: 4 }}>标签（逗号分隔）</Text>
               <Input value={editingDoc.tags}
-                onChange={(e) => setEditingDoc({ ...editingDoc, tags: e.target.value })}
-                placeholder="如：AI开发, 深度学习, 计算机视觉" />
+                onChange={(e) => setEditingDoc({ ...editingDoc, tags: e.target.value })} />
             </div>
             <div>
-              <Text style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', display: 'block', marginBottom: 4 }}>
-                摘要
-              </Text>
+              <Text style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e', display: 'block', marginBottom: 4 }}>摘要</Text>
               <Input.TextArea value={editingDoc.summary}
                 onChange={(e) => setEditingDoc({ ...editingDoc, summary: e.target.value })}
-                rows={3} placeholder="一句话概括文档内容" />
+                rows={3} />
             </div>
           </div>
         )}

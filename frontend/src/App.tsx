@@ -8,7 +8,6 @@ import Chat from './pages/Chat'
 import ChangePassword from './pages/profile/ChangePassword'
 import Dashboard from './pages/admin/Dashboard'
 import KBDashboard from './pages/admin/KBDashboard'
-import DocumentList from './pages/admin/DocumentList'
 import UserManagement from './pages/admin/UserManagement'
 import ModelSettings from './pages/admin/ModelSettings'
 
@@ -43,7 +42,6 @@ function App() {
       }>
         <Route index element={<Dashboard />} />
         <Route path="kb-dashboard" element={<KBDashboard />} />
-        <Route path="documents" element={<DocumentList />} />
         <Route path="users" element={<UserManagement />} />
         <Route path="models" element={<ModelSettings />} />
       </Route>
