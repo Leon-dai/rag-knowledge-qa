@@ -15,18 +15,29 @@ async def stream_response(
 ) -> AsyncGenerator[str, None]:
     """将 LLM 流式输出转为 SSE 格式
 
-    Args:
-        llm_generator: LangChain LLM 的 astream 生成器
-        citations: 引用来源列表，格式 [{"source": "...", "page": 1, "text": "..."}]
+    支持两种 chunk 格式：
+    - 字符串/标准 LangChain chunk：直接作为 token 输出
+    - 字典 {"type": "thinking"/"token", "content": "..."}：分别输出 thinking 和 token 事件
 
     Yields:
         SSE 格式字符串
     """
     token_index = 0
-    full_text = ""
 
     async for chunk in llm_generator:
-        # LangChain 流式输出的 chunk 可能是 AIMessageChunk
+        # 字典格式：来自 _astream_llm_with_retry 的结构化输出
+        if isinstance(chunk, dict):
+            event_type = chunk.get("type", "token")
+            content = chunk.get("content", "")
+            if content:
+                if event_type == "thinking":
+                    yield f"data: {json.dumps({'thinking': content}, ensure_ascii=False)}\n\n"
+                else:
+                    yield f"data: {json.dumps({'token': content, 'index': token_index}, ensure_ascii=False)}\n\n"
+                    token_index += 1
+            continue
+
+        # 原始 LangChain chunk / 字符串
         content = ""
         if hasattr(chunk, "content"):
             content = chunk.content
@@ -36,8 +47,6 @@ async def stream_response(
             content = str(chunk)
 
         if content:
-            full_text += content
-            # 发送 token
             yield f"data: {json.dumps({'token': content, 'index': token_index}, ensure_ascii=False)}\n\n"
             token_index += 1
 

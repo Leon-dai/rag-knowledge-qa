@@ -135,3 +135,68 @@ body {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.4; transform: scale(0.7); }
 }
+
+/* 输入框：禁止 focus 时边框变色 */
+.chat-input textarea:focus,
+.chat-input textarea:focus-visible,
+.chat-input.ant-input-focused {
+  border-color: #e0e0e0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+/* ========== 打印样式 ========== */
+@media print {
+  /* 隐藏所有非对话内容 */
+  .no-print,
+  .no-print * {
+    display: none !important;
+  }
+
+  /* 全屏对话 */
+  html, body {
+    width: 100%;
+    height: auto;
+    overflow: visible !important;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+
+  .print-area {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 24px !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  /* 打印时去掉消息背景色和阴影 */
+  .print-area .markdown-content pre {
+    background: #f5f5f5 !important;
+    color: #333 !important;
+    border: 1px solid #ddd;
+  }
+
+  /* 保留高亮 */
+  .search-highlight {
+    background: #FFD700 !important;
+    color: #000 !important;
+    font-weight: 600 !important;
+  }
+
+  /* 打印时显示的标题 */
+  .print-only {
+    display: block !important;
+  }
+}

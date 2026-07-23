@@ -176,6 +176,8 @@ class ChatService:
                 session_id=m.session_id,
                 role=m.role,
                 content=m.content,
+                thinking=m.thinking,
+                thinking_time=m.thinking_time,
                 citations=citations,
                 created_at=str(m.created_at),
             ))
@@ -189,6 +191,7 @@ class ChatService:
         user_id: str,
         content: str,
         search_mode: str = "local",
+        deep_think: bool = False,
     ) -> StreamingResponse:
         """发送消息并返回 SSE 流式响应"""
         # 验证会话归属
@@ -224,6 +227,8 @@ class ChatService:
         # 4. 创建流式响应
         async def generate_and_save():
             full_answer = ""
+            full_thinking = ""
+            thinking_start = None
             citations = []
 
             # 使用独立的数据库会话保存 AI 响应
@@ -235,13 +240,10 @@ class ChatService:
                     session_id=session_id,
                     role="assistant",
                     content="",
+                    thinking="",
                 )
 
-                async for sse_data in RAGService.query(content, chat_history, search_mode):
-                    # 解析 SSE 数据获取 token 和 citations
-                    if "data:" in sse_data or sse_data.startswith("data:"):
-                        # 直接透传 SSE 给客户端
-                        pass
+                async for sse_data in RAGService.query(content, chat_history, search_mode, deep_think):
                     yield sse_data
 
                     # 解析累积的文本
@@ -249,7 +251,11 @@ class ChatService:
                         data_str = sse_data.strip()
                         if data_str.startswith("data: "):
                             parsed = json.loads(data_str[6:])
-                            if "token" in parsed:
+                            if "thinking" in parsed:
+                                if thinking_start is None:
+                                    thinking_start = datetime.now()
+                                full_thinking += parsed["thinking"]
+                            elif "token" in parsed:
                                 full_answer += parsed["token"]
                             elif "sources" in parsed:
                                 citations = parsed["sources"]
@@ -258,6 +264,8 @@ class ChatService:
 
                 # 保存 AI 回答
                 assistant_msg.content = full_answer
+                assistant_msg.thinking = full_thinking or None
+                assistant_msg.thinking_time = round((datetime.now() - thinking_start).total_seconds(), 1) if thinking_start and full_thinking else None
                 assistant_msg.citations = json.dumps(citations, ensure_ascii=False)
                 assistant_msg.output_tokens = count_tokens(full_answer)
                 save_db.add(assistant_msg)

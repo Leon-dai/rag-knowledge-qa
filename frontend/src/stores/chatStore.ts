@@ -5,6 +5,8 @@ interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
+  thinking: string | null
+  thinkingTime: number | null
   citations: any[] | null
   created_at: string
 }
@@ -22,17 +24,19 @@ interface ChatState {
   currentSession: Session | null
   messages: Message[]
   streamingContent: string
+  streamingThinking: string
+  thinkingStartTime: number
+  thinkingDone: boolean
   isStreaming: boolean
   statusText: string
   loading: boolean
-  // 搜索高亮：{ q: 搜索词, msg: 匹配的消息 ID }
   searchHighlight: { q: string; msg: string } | null
 
   fetchSessions: () => Promise<void>
   createSession: () => Promise<void>
   selectSession: (sessionId: string) => void
   fetchMessages: (sessionId: string) => Promise<void>
-  sendMessage: (sessionId: string, content: string, searchMode?: 'local' | 'web' | 'mixed') => Promise<void>
+  sendMessage: (sessionId: string, content: string, searchMode?: 'local' | 'web', deepThink?: boolean) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
   renameSession: (sessionId: string, title: string) => Promise<void>
   setSearchHighlight: (data: { q: string; msg: string } | null) => void
@@ -40,11 +44,50 @@ interface ChatState {
 
 let abortController: AbortController | null = null
 
+// 思考内容打字机：缓冲 chunk，30ms 间隔逐字吐到 UI
+let thinkingTimer: ReturnType<typeof setInterval> | null = null
+let thinkingBuffer = ''
+
+function flushThinking(set: (fn: (state: ChatState) => Partial<ChatState>) => void) {
+  if (!thinkingTimer) {
+    thinkingTimer = setInterval(() => {
+      if (thinkingBuffer.length > 0) {
+        const n = Math.min(5, thinkingBuffer.length)
+        const chunk = thinkingBuffer.slice(0, n)
+        thinkingBuffer = thinkingBuffer.slice(n)
+        set((s) => ({ streamingThinking: s.streamingThinking + chunk }))
+      }
+    }, 30)
+  }
+}
+
+function stopThinkingTimer() {
+  if (thinkingTimer) {
+    clearInterval(thinkingTimer)
+    thinkingTimer = null
+  }
+  thinkingBuffer = ''
+}
+
+/** 解析深度思考消息：从【思考过程】和【回答】标记中分离思考和回答 */
+function parseDeepThink(text: string): { thinking: string; content: string } {
+  const thinkMatch = text.match(/【思考过程】\s*([\s\S]*?)【回答】/)
+  if (thinkMatch) {
+    const thinking = thinkMatch[1].trim()
+    const content = text.slice(thinkMatch.index! + thinkMatch[0].length).trim()
+    return { thinking, content: content || text }
+  }
+  return { thinking: '', content: text }
+}
+
 export const useChatStore = create<ChatState>((set, get) => ({
   sessions: [],
   currentSession: null,
   messages: [],
   streamingContent: '',
+  streamingThinking: '',
+  thinkingStartTime: 0,
+  thinkingDone: false,
   isStreaming: false,
   statusText: '',
   loading: false,
@@ -82,7 +125,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ loading: true })
     try {
       const res = await chatAPI.getMessages(sessionId)
-      set({ messages: res.data.items || [] })
+      const items = (res.data.items || []).map((m: any) => ({
+        ...m,
+        thinkingTime: m.thinking_time ?? null,
+      }))
+      set({ messages: items })
     } catch {
       set({ messages: [] })
     } finally {
@@ -90,7 +137,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  sendMessage: async (sessionId: string, content: string, searchMode: 'local' | 'web' | 'mixed' = 'local') => {
+  sendMessage: async (sessionId: string, content: string, searchMode: 'local' | 'web' = 'local', deepThink: boolean = false) => {
     // 中断上一个流
     if (abortController) {
       abortController.abort()
@@ -103,12 +150,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
         id: `assistant-${Date.now()}`,
         role: 'assistant',
         content: currentStreaming + ' [已中断]',
+        thinking: null,
+        thinkingTime: null,
         citations: null,
         created_at: new Date().toISOString(),
       }
+      stopThinkingTimer()
       set((state) => ({
         messages: [...state.messages, partialMsg],
         streamingContent: '',
+        streamingThinking: '',
+        thinkingDone: false,
         isStreaming: false,
       }))
     }
@@ -118,6 +170,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       id: `user-${Date.now()}`,
       role: 'user',
       content,
+      thinking: null,
+      thinkingTime: null,
       citations: null,
       created_at: new Date().toISOString(),
     }
@@ -137,7 +191,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ content, search_mode: searchMode }),
+        body: JSON.stringify({ content, search_mode: searchMode, deep_think: deepThink }),
         signal: abortController.signal,
       })
 
@@ -153,6 +207,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const decoder = new TextDecoder()
       let fullContent = ''
+      let fullThinking = ''
       let citations: any[] = []
       let lineBuffer = ''
       let saved = false
@@ -170,7 +225,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (trimmed.startsWith('data: ')) {
             try {
               const data = JSON.parse(trimmed.slice(6))
-              if (data.token) {
+              if (data.thinking) {
+                if (!fullThinking) {
+                  set({ thinkingStartTime: Date.now(), streamingThinking: '' })
+                  flushThinking(set as any)
+                }
+                thinkingBuffer += data.thinking
+                fullThinking += data.thinking
+              } else if (data.token) {
+                if (fullThinking && !get().thinkingDone) {
+                  stopThinkingTimer()
+                  set({ thinkingDone: true })
+                }
                 fullContent += data.token
                 set({ streamingContent: fullContent })
               } else if (data.status) {
@@ -179,16 +245,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 citations = data.sources
               } else if (data.done) {
                 saved = true
+                const startTime = get().thinkingStartTime
+                const thinkingSec = startTime ? ((Date.now() - startTime) / 1000).toFixed(1) : null
+                const parsed = parseDeepThink(fullContent)
+                const thinkingText = fullThinking || parsed.thinking || null
+                const answerText = parsed.thinking ? parsed.content : fullContent
                 const assistantMsg: Message = {
                   id: `assistant-${Date.now()}`,
                   role: 'assistant',
-                  content: fullContent,
+                  content: answerText,
+                  thinking: thinkingText,
+                  thinkingTime: thinkingSec ? parseFloat(thinkingSec) : null,
                   citations,
                   created_at: new Date().toISOString(),
                 }
                 set((state) => ({
                   messages: [...state.messages, assistantMsg],
                   streamingContent: '',
+                  streamingThinking: '',
+                  thinkingStartTime: 0,
+                  thinkingDone: false,
                   isStreaming: false,
                   statusText: '',
                 }))
@@ -202,16 +278,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       // 如果没收到 done 事件，补保存消息
       if (!saved && fullContent) {
+        const startTime = get().thinkingStartTime
+        const thinkingSec = startTime ? ((Date.now() - startTime) / 1000).toFixed(1) : null
+        const parsed = parseDeepThink(fullContent)
+        const thinkingText = fullThinking || parsed.thinking || null
+        const answerText = parsed.thinking ? parsed.content : fullContent
         const assistantMsg: Message = {
           id: `assistant-${Date.now()}`,
           role: 'assistant',
-          content: fullContent,
+          content: answerText,
+          thinking: thinkingText,
+          thinkingTime: thinkingSec ? parseFloat(thinkingSec) : null,
           citations,
           created_at: new Date().toISOString(),
         }
         set((state) => ({
           messages: [...state.messages, assistantMsg],
           streamingContent: '',
+          streamingThinking: '',
+          thinkingStartTime: 0,
+          thinkingDone: false,
           isStreaming: false,
           statusText: '',
         }))
@@ -224,7 +310,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // 用户主动中断，静默处理
         return
       }
-      set({ streamingContent: '', isStreaming: false })
+      stopThinkingTimer()
+      set({ streamingContent: '', streamingThinking: '', thinkingDone: false, isStreaming: false })
       throw err
     }
   },

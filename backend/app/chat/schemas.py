@@ -38,7 +38,11 @@ class SendMessageRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=5000, description="消息内容")
     search_mode: str = Field(
         default="local",
-        description="搜索模式: 'local' (本地知识库), 'web' (仅联网), 'mixed' (混合搜索)"
+        description="搜索模式: 'local' (不联网), 'web' (联网搜索)"
+    )
+    deep_think: bool = Field(
+        default=False,
+        description="深度思考模式：开启后 AI 逐步推理分析"
     )
 
 
@@ -48,6 +52,8 @@ class MessageResponse(BaseModel):
     session_id: str
     role: str
     content: str
+    thinking: str | None = None
+    thinking_time: float | None = None
     citations: list | None = None
     created_at: str
 

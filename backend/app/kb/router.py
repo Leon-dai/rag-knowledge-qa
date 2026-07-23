@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require_admin, get_current_user
 from app.auth.models import User
 from app.database import get_db
-from app.kb.schemas import DocumentListResponse, DocumentDetailResponse
+from app.kb.schemas import DocumentListResponse, DocumentDetailResponse, UpdateMetadataRequest
 from app.kb.service import DocumentService
 from app.kb.models import Document
 
@@ -42,6 +42,33 @@ async def list_documents(
     return await DocumentService.list_documents(db, page, size, status)
 
 
+@router.get("/dashboard", include_in_schema=True)
+async def get_dashboard(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """知识库仪表盘：按分类分组，返回每类文件数和文件列表"""
+    return await DocumentService.get_dashboard(db)
+
+
+@router.get("/daily-review", include_in_schema=True)
+async def get_daily_review(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """每日回顾：随机返回一条知识库文档"""
+    return await DocumentService.get_daily_review(db)
+
+
+@router.post("/reclassify")
+async def reclassify_documents(
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """批量重新分类所有未分类的文档（管理员专属）"""
+    return await DocumentService.reclassify_all(db)
+
+
 @router.get("/{doc_id}", response_model=DocumentDetailResponse)
 async def get_document(
     doc_id: str,
@@ -60,6 +87,23 @@ async def delete_document(
 ):
     """删除文档（管理员专属）"""
     return await DocumentService.delete_document(db, doc_id)
+
+
+@router.patch("/{doc_id}/metadata")
+async def update_document_metadata(
+    doc_id: str,
+    body: UpdateMetadataRequest,
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """手动更新文档文件名、分类、标签、摘要（管理员专属）"""
+    return await DocumentService.update_metadata(
+        db, doc_id,
+        original_filename=body.original_filename,
+        category=body.category,
+        tags=body.tags,
+        summary=body.summary,
+    )
 
 
 @router.post("/{doc_id}/reprocess", status_code=202)

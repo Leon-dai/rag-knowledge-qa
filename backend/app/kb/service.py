@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 
 from fastapi import HTTPException, status, UploadFile
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -19,8 +19,69 @@ from app.logging import logger
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".doc", ".txt", ".md", ".csv", ".xlsx", ".xls"}
 
 
+def _parse_tags(tags_str: str | None) -> list[str] | None:
+    """解析数据库中存储的 JSON 标签字符串"""
+    if not tags_str:
+        return None
+    try:
+        import json as _json
+        return _json.loads(tags_str)
+    except Exception:
+        return None
+
+
 class DocumentService:
     """文档管理服务"""
+
+    # ==================== AI 智能分类 ====================
+
+    ANALYZE_PROMPT = """你是一个知识管理专家。分析以下文档内容，判断它属于什么类型。
+
+文档内容（开头+结尾）：
+{content}
+
+请根据文档内容，给出最精准的分类名称（2-6个字，如"简历""行业报告""会议纪要""产品需求""技术方案""学术论文""数据报表""操作指南""录取名单""试题解析""产品介绍""个人简历"等，越具体越好）。不要使用"其他"作为分类，除非文档内容实在无法归类。
+
+用 JSON 格式回复（不要其他内容）：
+{{"category": "你判断的分类名称", "tags": ["标签1", "标签2", "标签3"], "summary": "一句话概括文档核心内容，限80字"}}"""
+
+    @staticmethod
+    async def _analyze_document(doc, lc_docs: list, db):
+        """AI 分析文档：提取分类、标签、摘要，存入数据库"""
+        import json as json_mod
+
+        try:
+            # 拼接文档内容：前 3000 字 + 后 1000 字
+            full_text = "\n".join([d.page_content for d in lc_docs])
+            if len(full_text) <= 4000:
+                sample = full_text
+            else:
+                sample = full_text[:3000] + "\n...(中间省略)...\n" + full_text[-1000:]
+
+            prompt = DocumentService.ANALYZE_PROMPT.format(content=sample)
+
+            from app.rag.service import RAGService
+            llm = RAGService._get_llm(model="qwen-turbo", streaming=False)
+            response = llm.invoke(prompt)
+            result = response.content.strip()
+
+            # 解析 JSON
+            json_match = __import__('re').search(r'\{[^}]+\}', result)
+            if json_match:
+                data = json_mod.loads(json_match.group())
+                doc.category = data.get("category", "其他")[:20]
+                doc.tags = json_mod.dumps(data.get("tags", []), ensure_ascii=False)
+                doc.summary = data.get("summary", "")[:200]
+                await db.commit()
+                logger.info(f"AI 分类完成: {doc.original_filename} → {doc.category}")
+            else:
+                logger.warning(f"AI 分类 JSON 解析失败: {result[:100]}")
+
+        except Exception as e:
+            logger.warning(f"AI 分类失败: {doc.original_filename}: {e}")
+            # 分类失败不影响主流程，字段保持为 None
+
+    # ==================== 文档 CRUD ====================
 
     @staticmethod
     async def upload(db: AsyncSession, file: UploadFile, user_id: str) -> DocumentResponse:
@@ -73,6 +134,9 @@ class DocumentService:
             file_size=doc.file_size,
             status=doc.status,
             chunk_count=doc.chunk_count,
+            category=doc.category,
+            tags=_parse_tags(doc.tags),
+            summary=doc.summary,
             created_at=str(doc.created_at) if doc.created_at else "",
             updated_at=str(doc.updated_at) if doc.updated_at else "",
         )
@@ -109,6 +173,9 @@ class DocumentService:
                 status=doc.status,
                 error_message=doc.error_message,
                 chunk_count=doc.chunk_count,
+                category=doc.category,
+                tags=_parse_tags(doc.tags),
+                summary=doc.summary,
                 created_at=str(doc.created_at) if doc.created_at else "",
                 updated_at=str(doc.updated_at) if doc.updated_at else "",
             )
@@ -204,6 +271,9 @@ class DocumentService:
             file_size=doc.file_size,
             status=doc.status,
             chunk_count=doc.chunk_count,
+            category=doc.category,
+            tags=_parse_tags(doc.tags),
+            summary=doc.summary,
             created_at=str(doc.created_at) if doc.created_at else "",
             updated_at=str(doc.updated_at) if doc.updated_at else "",
         )
@@ -233,6 +303,9 @@ class DocumentService:
 
                 # 2. 加载文档
                 lc_docs = load_document(doc.file_path, doc.original_filename)
+
+                # 2.5 AI 智能分类：异步分析文档内容，提取分类、标签、摘要
+                await DocumentService._analyze_document(doc, lc_docs, db)
 
                 # 3. 父子分块（Small-to-Big）
                 from app.kb.parent_splitter import split_documents_with_parents
@@ -280,6 +353,136 @@ class DocumentService:
                 doc.error_message = str(e)
                 await db.commit()
                 logger.error(f"文档处理失败: {doc.original_filename}: {e}")
+
+    @staticmethod
+    async def get_dashboard(db: AsyncSession) -> dict:
+        """知识库仪表盘：按分类分组"""
+        result = await db.execute(
+            select(Document).where(Document.status == "ready")
+        )
+        docs = result.scalars().all()
+
+        categories: dict[str, list] = {}
+        for doc in docs:
+            cat = doc.category or "未分类"
+            if cat not in categories:
+                categories[cat] = []
+            categories[cat].append({
+                "id": doc.id,
+                "original_filename": doc.original_filename,
+                "file_type": doc.file_type,
+                "summary": doc.summary,
+                "tags": _parse_tags(doc.tags),
+                "created_at": str(doc.created_at) if doc.created_at else "",
+            })
+
+        return {
+            "total": len(docs),
+            "categories": [
+                {"name": cat, "count": len(items), "items": items}
+                for cat, items in sorted(categories.items(), key=lambda x: -len(x[1]))
+            ],
+        }
+
+    @staticmethod
+    async def get_daily_review(db: AsyncSession) -> dict | None:
+        """每日回顾：随机返回一条已处理文档"""
+        result = await db.execute(
+            select(Document)
+            .where(Document.status == "ready", Document.summary.isnot(None))
+            .order_by(func.random())
+            .limit(1)
+        )
+        doc = result.scalar_one_or_none()
+        if doc is None:
+            return None
+
+        return {
+            "id": doc.id,
+            "original_filename": doc.original_filename,
+            "file_type": doc.file_type,
+            "category": doc.category,
+            "tags": _parse_tags(doc.tags),
+            "summary": doc.summary,
+            "created_at": str(doc.created_at) if doc.created_at else "",
+        }
+
+    @staticmethod
+    async def update_metadata(
+        db: AsyncSession,
+        doc_id: str,
+        original_filename: str | None = None,
+        category: str | None = None,
+        tags: list[str] | None = None,
+        summary: str | None = None,
+    ) -> DocumentResponse:
+        """手动更新文档的分类、标签、摘要、文件名"""
+        import json as json_mod
+
+        doc = await DocumentService._get_or_404(db, doc_id)
+
+        if original_filename is not None:
+            doc.original_filename = original_filename[:200] if original_filename else doc.original_filename
+        if category is not None:
+            doc.category = category[:20] if category else None
+        if tags is not None:
+            doc.tags = json_mod.dumps(tags, ensure_ascii=False) if tags else None
+        if summary is not None:
+            doc.summary = summary[:200] if summary else None
+
+        await db.commit()
+        await db.refresh(doc)
+
+        logger.info(f"文档元数据已更新: {doc.original_filename}")
+
+        return DocumentResponse(
+            id=doc.id,
+            original_filename=doc.original_filename,
+            file_type=doc.file_type,
+            file_size=doc.file_size,
+            status=doc.status,
+            chunk_count=doc.chunk_count,
+            category=doc.category,
+            tags=_parse_tags(doc.tags),
+            summary=doc.summary,
+            created_at=str(doc.created_at) if doc.created_at else "",
+            updated_at=str(doc.updated_at) if doc.updated_at else "",
+        )
+
+    @staticmethod
+    async def reclassify_all(db: AsyncSession) -> dict:
+        """批量重新分类所有已处理文档（覆盖旧分类）"""
+        result = await db.execute(
+            select(Document).where(Document.status == "ready")
+        )
+        docs = result.scalars().all()
+
+        if not docs:
+            return {"message": "没有已处理的文档", "count": 0}
+
+        success = 0
+        failed = 0
+        for doc in docs:
+            try:
+                # 清除旧分类，重新 AI 分析
+                doc.category = None
+                doc.tags = None
+                doc.summary = None
+                await db.commit()
+
+                from app.kb.loader import load_document
+                lc_docs = load_document(doc.file_path, doc.original_filename)
+                await DocumentService._analyze_document(doc, lc_docs, db)
+                success += 1
+            except Exception as e:
+                logger.warning(f"重新分类失败: {doc.original_filename}: {e}")
+                failed += 1
+
+        return {
+            "message": f"重新分类完成: {success} 成功, {failed} 失败",
+            "count": success,
+            "failed": failed,
+        }
 
     @staticmethod
     async def _get_or_404(db: AsyncSession, doc_id: str) -> Document:

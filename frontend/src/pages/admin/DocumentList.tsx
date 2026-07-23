@@ -4,12 +4,13 @@ import {
   Typography, Modal, Progress
 } from 'antd'
 import {
-  UploadOutlined, DeleteOutlined, ReloadOutlined,
+  UploadOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined,
   FilePdfOutlined, FileTextOutlined, FileExcelOutlined,
   FileOutlined, LoadingOutlined, SyncOutlined
 } from '@ant-design/icons'
 import type { UploadProps } from 'antd'
 import { useKBStore } from '../../stores/kbStore'
+import { docsAPI } from '../../api/docs'
 import dayjs from 'dayjs'
 
 const { Title } = Typography
@@ -125,7 +126,13 @@ export default function DocumentList() {
       key: 'actions',
       width: 160,
       render: (_: any, record: any) => (
-        <Space>
+        <Space size={0}>
+          <Button
+            type="link"
+            size="small"
+            icon={<DownloadOutlined />}
+            onClick={() => docsAPI.download(record.id, record.original_filename)}
+          />
           {record.status === 'error' && (
             <Button
               type="link"

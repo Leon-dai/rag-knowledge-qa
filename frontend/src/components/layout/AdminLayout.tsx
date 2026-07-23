@@ -6,6 +6,7 @@ import {
   TeamOutlined,
   SettingOutlined,
   ArrowLeftOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 
@@ -21,6 +22,11 @@ export default function AdminLayout() {
       key: '/admin',
       icon: <DashboardOutlined />,
       label: '仪表盘',
+    },
+    {
+      key: '/admin/kb-dashboard',
+      icon: <AppstoreOutlined />,
+      label: '知识库全景',
     },
     {
       key: '/admin/documents',

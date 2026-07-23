@@ -1,5 +1,4 @@
 """RAG 问答服务：混合检索 → Reranker精排 → 流式生成"""
-from datetime import date
 from typing import AsyncGenerator
 
 from langchain_core.documents import Document
@@ -12,7 +11,9 @@ from app.rag.retriever import hybrid_search
 from app.rag.reranker import rerank
 from app.rag.prompts import (
     RAG_SYSTEM_PROMPT,
+    RAG_SYSTEM_PROMPT_DEEP,
     CHAT_SYSTEM_PROMPT,
+    CHAT_SYSTEM_PROMPT_DEEP,
     RAG_PROMPT_TEMPLATE,
     CHAT_PROMPT_TEMPLATE,
 )
@@ -105,14 +106,102 @@ class RAGService:
 
     @staticmethod
     async def _astream_llm_with_retry(llm, prompt: str) -> AsyncGenerator:
-        """带错误处理的流式 LLM 调用"""
+        """带错误处理的流式 LLM 调用
+
+        解析 LangChain chunk，当存在 reasoning_content 时拆分为 thinking 事件。
+        返回字典：{"type": "thinking"/"token", "content": "..."}
+        """
         try:
             generator = llm.astream(prompt)
             async for chunk in generator:
-                yield chunk
+                reasoning = None
+                content = None
+
+                if hasattr(chunk, "additional_kwargs") and chunk.additional_kwargs:
+                    reasoning = chunk.additional_kwargs.get("reasoning_content")
+
+                if hasattr(chunk, "content"):
+                    content = chunk.content
+
+                if reasoning:
+                    yield {"type": "thinking", "content": reasoning}
+                if content:
+                    yield {"type": "token", "content": content}
         except Exception as e:
             logger.error(f"流式生成失败: {e}")
-            # 发送错误事件给前端
+            yield await emit_status(f"生成回答时出错，请重试: {str(e)}")
+
+    @staticmethod
+    async def _astream_dashscope_deep_think(
+        messages: list[dict],
+    ) -> AsyncGenerator:
+        """使用 httpx 直接调 DashScope REST API，真正的逐 token 流式
+
+        绕过 DashScope SDK 的同步生成器，用 httpx 异步读取 SSE 流，
+        确保每个 token 实时推送到前端。
+        """
+        import httpx
+        import json as json_mod
+
+        try:
+            url = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {settings.dashscope_api_key}",
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream",
+            }
+            body = {
+                "model": "qwen3.7-plus",
+                "messages": messages,
+                "stream": True,
+                "stream_options": {"include_usage": True},
+                "enable_thinking": True,
+            }
+
+            logger.info(f"深度思考请求开始 model=qwen3.7-plus")
+
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                async with client.stream("POST", url, json=body, headers=headers) as resp:
+                    logger.info(f"DashScope 响应 status={resp.status_code}")
+                    if resp.status_code != 200:
+                        body_text = await resp.aread()
+                        logger.error(f"DashScope 错误: {body_text[:500]}")
+                        yield await emit_status(f"调用失败: HTTP {resp.status_code}")
+                        return
+
+                    thinking_chunks = 0
+                    token_chunks = 0
+                    async for line in resp.aiter_lines():
+                        if not line:
+                            continue
+                        if not line.startswith("data:"):
+                            continue
+                        data_str = line[5:].strip()
+                        if data_str == "[DONE]":
+                            logger.info(f"深度思考完成: thinking={thinking_chunks} token={token_chunks}")
+                            break
+                        try:
+                            data = json_mod.loads(data_str)
+                            choices = data.get("choices", [])
+                            if choices:
+                                delta = choices[0].get("delta", {})
+                                reasoning = delta.get("reasoning_content", "") or ""
+                                content = delta.get("content", "") or ""
+
+                                if reasoning:
+                                    thinking_chunks += 1
+                                    yield {"type": "thinking", "content": reasoning}
+                                if content:
+                                    token_chunks += 1
+                                    yield {"type": "token", "content": content}
+                            else:
+                                # usage chunk
+                                pass
+                        except json_mod.JSONDecodeError:
+                            if raw_line_count <= 3:
+                                logger.info(f"DashScope non-JSON: {data_str[:200]}")
+        except Exception as e:
+            logger.error(f"深度思考流式调用失败: {e}")
             yield await emit_status(f"生成回答时出错，请重试: {str(e)}")
 
     @staticmethod
@@ -137,6 +226,28 @@ class RAGService:
             return "暂无相关资料"
 
         return "\n\n---\n\n".join(parts)
+
+    @staticmethod
+    def _extract_search_keyword(question: str, rewritten_queries: list[str]) -> str:
+        """为联网搜索提取关键词。规则清理口语词，不依赖 LLM。"""
+        import re
+
+        # 如果改写结果可用（短且无对话语气），直接用
+        if rewritten_queries:
+            candidate = rewritten_queries[0]
+            chatter_markers = ["好的", "我将帮助", "以下是", "首先", "步骤", "请稍等", "现在我开始"]
+            if not any(m in candidate for m in chatter_markers) and len(candidate) < 100:
+                return candidate
+
+        # 规则清理：去掉常见口语前后缀
+        cleaned = question
+        # 去掉前缀：我(需要/想/要)你查/搜/找 + 帮我/麻烦/请 + 查/搜/找 + 一下/个
+        cleaned = re.sub(r'^(我(需要|想要|要|想)你?|你(能|可以)|(请|麻烦|帮忙|帮我)你?)\s*(帮我?)?\s*(查|搜|找|搜索|查询|看看|看一下)\s*(一下|一个|个)?\s*', '', cleaned)
+        # 去掉后缀：大哥/兄弟/大佬/吗/好吗/行吗/可以吗/能做到吗/谢谢
+        cleaned = re.sub(r'[，,!\s]*(大哥|兄弟|大佬|好吗|行吗|可以吗|能做到吗|能查到吗|谢谢|多谢|拜托|哈|哦|啊)[!！?？。]*$', '', cleaned)
+        cleaned = cleaned.strip('，,!！?？。 \t\n\r')
+
+        return cleaned if cleaned else question
 
     @staticmethod
     def _build_chat_history(history: list[dict]) -> str:
@@ -211,7 +322,8 @@ class RAGService:
     async def query(
         question: str,
         chat_history: list[dict] | None = None,
-        search_mode: str = "local",  # "local", "web", "mixed"
+        search_mode: str = "local",  # "local" (不联网), "web" (联网)
+        deep_think: bool = False,
     ) -> AsyncGenerator[str, None]:
         """RAG 问答主流程：支持本地/联网/混合搜索
 
@@ -226,29 +338,58 @@ class RAGService:
         Yields:
             SSE 格式字符串
         """
-        today = date.today().strftime("%Y年%m月%d日")
         history_text = RAGService._build_chat_history(chat_history or [])
 
-        # 0. 查询路由：根据问题类型选择检索策略
-        # 参考: All-in-RAG Chapter 4 — 查询分发与路由
-        yield await emit_status("正在分析查询类型...")
+        # 0. 意图检测
+        yield await emit_status("正在分析问题...")
+        from app.rag.intent_detector import detect_intent
+        intent = detect_intent(question)
+        logger.info(f"意图检测: question='{question[:60]}...' → {intent}")
+
+        # 0.1 闲聊：跳过搜索，直接 LLM
+        if intent == "chitchat":
+            yield await emit_status("AI 自由回答...")
+            citations = []
+            system_prompt = CHAT_SYSTEM_PROMPT_DEEP if deep_think else CHAT_SYSTEM_PROMPT
+            prompt_text = CHAT_PROMPT_TEMPLATE.format(
+                system_prompt=system_prompt,
+                chat_history=history_text,
+                question=question,
+            )
+
+            if deep_think:
+                messages = [{"role": "system", "content": system_prompt}]
+                if history_text and history_text != "（无历史对话）":
+                    user_content = f"对话历史：\n{history_text}\n\n用户的问题是：{question}"
+                else:
+                    user_content = f"用户的问题是：{question}"
+                messages.append({"role": "user", "content": user_content})
+                generator = RAGService._astream_dashscope_deep_think(messages)
+            else:
+                llm = RAGService._get_llm(streaming=True)
+                generator = RAGService._astream_llm_with_retry(llm, prompt_text)
+
+            async for sse_event in stream_response(generator, citations):
+                yield sse_event
+            return
+
+        # 1. 查询路由：根据问题类型选择检索策略
         from app.rag.query_router import get_search_strategy
         strategy = get_search_strategy(question)
         vector_weight = strategy["vector_weight"]
         bm25_weight = strategy["bm25_weight"]
-
-        # 1. 智能查询改写：分解复合问题 + 改写为检索关键词
-        yield await emit_status("正在理解问题...")
-        from app.rag.query_rewriter import smart_rewrite_query
-        rewritten_queries = smart_rewrite_query(question, chat_history)
 
         # 2. 根据 search_mode 执行搜索
         local_candidates = []
         web_results = []
 
         # 本地搜索
-        if search_mode in ["local", "mixed"]:
+        if search_mode in ["local", "web"]:
             yield await emit_status(f"正在检索本地知识库... (策略: {strategy['description']})")
+
+            # 智能查询改写：只在需要搜本地 KB 时才调用
+            from app.rag.query_rewriter import smart_rewrite_query
+            rewritten_queries = smart_rewrite_query(question, chat_history)
 
             # 用分解后的多个子问题分别检索，合并去重
             all_candidates = {}  # doc_key -> (doc, score)
@@ -267,20 +408,17 @@ class RAGService:
             local_candidates = list(all_candidates.values())[:8]  # 最多8条
 
         # 联网搜索
-        if search_mode in ["web", "mixed"]:
+        if search_mode == "web":
             yield await emit_status("正在搜索互联网...")
             from app.web import web_search
-            # 用原始问题搜索互联网
-            web_results = web_search(question, max_results=12)
+            # 直接提取检索关键词（不用 smart_rewrite_query，它太慢且输出不可靠）
+            web_query = RAGService._extract_search_keyword(question, [])
+            logger.info(f"联网搜索关键词: {web_query}")
+            web_results = web_search(web_query, max_results=5)
             if web_results:
                 logger.info(f"联网搜索成功: {len(web_results)} 条结果")
             else:
                 logger.warning("联网搜索无结果或失败")
-
-        # 3. 合并结果
-        all_docs = local_candidates
-        if not all_docs and not web_results:
-            yield await emit_status("未找到相关内容，切换为通用对话...")
 
         # 4. LLM-as-Judge：判断哪些本地文档真正与问题相关
         if local_candidates:
@@ -290,12 +428,13 @@ class RAGService:
             relevant = []
 
         # 5. 根据结果选择模式
+        # 关键：只有 LLM Judge 判定相关的文档才触发 RAG 模式，
+        # 否则降级为 Chat 模式，不强制加引用
         if relevant or web_results:
             # === RAG 模式：有相关文档 ===
             reranked = rerank(question, [doc for doc, _ in relevant], top_k=3) if relevant else []
 
             # 扩展子块为父块（Small-to-Big）
-            # 参考: All-in-RAG C8 — Parent Document Retriever
             expanded_docs = RAGService._expand_to_parent_docs([doc for doc, _ in reranked]) if reranked else []
 
             # 构建状态信息
@@ -307,10 +446,9 @@ class RAGService:
 
             yield await emit_status(f"{', '.join(status_parts)}，正在生成回答...")
 
-            # 构建引用（区分本地和网络）
+            # 构建引用
             citations = format_citations(reranked) if reranked else []
-            # 添加网络引用
-            for i, web_result in enumerate(web_results, 1):
+            for i, web_result in enumerate(web_results[:5], 1):
                 citations.append({
                     "source": f"🌐 {web_result.title}",
                     "doc_id": f"web_{i}",
@@ -324,7 +462,7 @@ class RAGService:
                 include_web_results=web_results
             )
 
-            system_prompt = RAG_SYSTEM_PROMPT.format(current_date=today)
+            system_prompt = RAG_SYSTEM_PROMPT_DEEP if deep_think else RAG_SYSTEM_PROMPT
             prompt_text = RAG_PROMPT_TEMPLATE.format(
                 system_prompt=system_prompt,
                 context=context,
@@ -332,19 +470,39 @@ class RAGService:
                 question=question,
             )
         else:
-            # === Chat 模式：无相关文档 ===
+            # === Chat 模式：无相关文档，LLM 自由回答，不引用 ===
             yield await emit_status("未找到相关内容，AI 自由回答...")
             citations = []
-            system_prompt = CHAT_SYSTEM_PROMPT.format(current_date=today)
+            system_prompt = CHAT_SYSTEM_PROMPT_DEEP if deep_think else CHAT_SYSTEM_PROMPT
             prompt_text = CHAT_PROMPT_TEMPLATE.format(
                 system_prompt=system_prompt,
                 chat_history=history_text,
                 question=question,
             )
 
-        # 6. 流式生成（带错误处理）
-        llm = RAGService._get_llm(streaming=True)
-        generator = RAGService._astream_llm_with_retry(llm, prompt_text)
+        # 6. 流式生成
+        if deep_think:
+            messages = [{"role": "system", "content": system_prompt}]
+
+            if citations:
+                # RAG 模式：资料 + 指令融合为一段
+                user_content = (
+                    f"以下是与用户问题相关的资料：\n\n{context}\n\n"
+                    f"用户的问题是：{question}\n\n"
+                    f"只使用以上资料中的信息回答。有相关信息就引用；没有就说暂无相关资料。"
+                )
+            else:
+                # Chat 模式
+                if history_text and history_text != "（无历史对话）":
+                    user_content = f"对话历史：\n{history_text}\n\n用户的问题是：{question}"
+                else:
+                    user_content = f"用户的问题是：{question}"
+
+            messages.append({"role": "user", "content": user_content})
+            generator = RAGService._astream_dashscope_deep_think(messages)
+        else:
+            llm = RAGService._get_llm(streaming=True)
+            generator = RAGService._astream_llm_with_retry(llm, prompt_text)
 
         async for sse_event in stream_response(generator, citations):
             yield sse_event
@@ -355,14 +513,13 @@ class RAGService:
         candidates = hybrid_search(question, top_k=4)
         relevant = RAGService._judge_relevance(question, candidates) if candidates else []
 
-        today = date.today().strftime("%Y年%m月%d日")
         llm = RAGService._get_llm(streaming=False)
 
         if relevant:
             citations = format_citations(relevant)
             context = RAGService._build_context(relevant)
             prompt = RAG_PROMPT_TEMPLATE.format(
-                system_prompt=RAG_SYSTEM_PROMPT.format(current_date=today),
+                system_prompt=RAG_SYSTEM_PROMPT,
                 context=context,
                 chat_history="",
                 question=question,
@@ -370,7 +527,7 @@ class RAGService:
         else:
             citations = []
             prompt = CHAT_PROMPT_TEMPLATE.format(
-                system_prompt=CHAT_SYSTEM_PROMPT.format(current_date=today),
+                system_prompt=CHAT_SYSTEM_PROMPT,
                 chat_history="",
                 question=question,
             )

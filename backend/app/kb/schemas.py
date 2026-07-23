@@ -11,6 +11,9 @@ class DocumentResponse(BaseModel):
     status: str
     error_message: str | None = None
     chunk_count: int = 0
+    category: str | None = None
+    tags: list[str] | None = None
+    summary: str | None = None
     created_at: str
     updated_at: str
 
@@ -35,3 +38,11 @@ class DocumentDetailResponse(DocumentResponse):
 class MessageResponse(BaseModel):
     """通用消息响应"""
     message: str
+
+
+class UpdateMetadataRequest(BaseModel):
+    """更新文档元数据请求"""
+    original_filename: str | None = None
+    category: str | None = None
+    tags: list[str] | None = None
+    summary: str | None = None

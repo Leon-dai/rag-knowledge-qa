@@ -1,6 +1,6 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Avatar, Typography, Space } from 'antd'
-import { UserOutlined, RobotOutlined } from '@ant-design/icons'
+import { UserOutlined, RobotOutlined, CaretDownOutlined, CaretRightOutlined } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
@@ -12,6 +12,8 @@ interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
+  thinking: string | null
+  thinkingTime: number | null
   citations: any[] | null
   created_at: string
 }
@@ -20,6 +22,7 @@ interface Props {
   message: Message
   isStreaming?: boolean
   highlight?: string
+  thinkingDone?: boolean
 }
 
 const HIGHLIGHT_STYLE = 'background:#FFD700;color:#000;font-weight:600;border-radius:2px;padding:1px 3px;'
@@ -49,8 +52,9 @@ function highlightInHtml(text: string, keyword: string): string {
   )
 }
 
-export default function MessageBubble({ message, isStreaming, highlight }: Props) {
+export default function MessageBubble({ message, isStreaming, highlight, thinkingDone }: Props) {
   const isUser = message.role === 'user'
+  const [thinkingExpanded, setThinkingExpanded] = useState(true)
 
   // AI 消息：预处理 markdown，在渲染前嵌入高亮 span
   const aiContent = useMemo(() => {
@@ -88,6 +92,43 @@ export default function MessageBubble({ message, isStreaming, highlight }: Props
     }}>
       <Avatar icon={<RobotOutlined />} style={{ backgroundColor: '#52c41a', flexShrink: 0 }} />
       <div style={{ flex: 1, maxWidth: '85%' }}>
+        {/* 深度思考：可折叠区域 */}
+        {message.thinking && (
+          <div style={{ marginBottom: 12 }}>
+            <div
+              onClick={() => setThinkingExpanded(!thinkingExpanded)}
+              style={{
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 13,
+                color: '#8c8c8c',
+                marginBottom: 6,
+                userSelect: 'none',
+              }}
+            >
+              {thinkingExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
+              <span>
+                {isStreaming && !thinkingDone
+                  ? '思考中...'
+                  : `已深度思考${message.thinkingTime ? ` (${message.thinkingTime}s)` : ''}`}
+              </span>
+            </div>
+            {thinkingExpanded && (
+              <div style={{
+                padding: '0 0 0 14px',
+                fontSize: 13,
+                color: '#8c8c8c',
+                lineHeight: 1.7,
+                borderLeft: '3px solid #d9d9d9',
+                whiteSpace: 'pre-wrap',
+              }}>
+                {message.thinking || ''}
+              </div>
+            )}
+          </div>
+        )}
         <div className="markdown-content" style={{ lineHeight: 1.8, fontSize: 14 }}>
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}

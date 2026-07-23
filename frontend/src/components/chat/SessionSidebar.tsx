@@ -31,8 +31,8 @@ export default function SessionSidebar({ collapsed, onToggle, onSearch }: Props)
 
 
   const handleCreate = async () => {
-    // 如果已有空对话，直接切过去，不重复创建
-    const existingEmpty = sessions.find(s => s.message_count === 0)
+    // 如果已有默认标题的空对话，直接切过去，不重复创建
+    const existingEmpty = sessions.find(s => s.message_count === 0 && s.title === '新对话')
     if (existingEmpty) {
       navigate(`/chat/${existingEmpty.id}`)
       return

@@ -22,6 +22,9 @@ class Document(Base):
     )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    category: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    tags: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON 数组字符串
+    summary: Mapped[str | None] = mapped_column(String(200), nullable=True)
     uploaded_by: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=True
     )

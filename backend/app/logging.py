@@ -40,7 +40,6 @@ def _log_format(record):
 
 def configure_logging():
     """配置 loguru：控制台彩色 + 文件持久化"""
-    # 移除默认 handler
     logger.remove()
 
     # 控制台：彩色、带格式
@@ -51,23 +50,22 @@ def configure_logging():
         colorize=True,
     )
 
-    # 确保日志目录存在
     LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 文件：所有日志（按天轮转，保留30天）
+    # 文件：所有日志
     logger.add(
         LOG_DIR / "app_{time:YYYY-MM-DD}.log",
-        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {extra[request_id]} | {name}:{function}:{line} - {message}",
+        format=_log_format,
         level="DEBUG",
-        rotation="00:00",  # 每天午夜轮转
+        rotation="00:00",
         retention="30 days",
         encoding="utf-8",
     )
 
-    # 文件：仅 ERROR 级别（方便快速排查）
+    # 文件：仅 ERROR 级别
     logger.add(
         LOG_DIR / "error_{time:YYYY-MM-DD}.log",
-        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {extra[request_id]} | {name}:{function}:{line} - {message}",
+        format=_log_format,
         level="ERROR",
         rotation="00:00",
         retention="30 days",

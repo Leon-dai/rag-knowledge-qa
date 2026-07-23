@@ -116,22 +116,35 @@ class WebSearcher:
             use_tavily: 是否优先使用 Tavily
 
         Returns:
-            搜索结果列表
+            搜索结果列表（已去重）
         """
         # 优先使用 Tavily
         if use_tavily:
             results = self.search_tavily(query, max_results)
             if results:
+                results = self._deduplicate(results)
                 return results
             logger.info("Tavily 失败，降级到 DuckDuckGo")
 
         # 降级到 DuckDuckGo
         results = self.search_duckduckgo(query, max_results)
         if results:
+            results = self._deduplicate(results)
             return results
 
         logger.warning("所有搜索引擎都不可用")
         return []
+
+    @staticmethod
+    def _deduplicate(results: List[WebSearchResult]) -> List[WebSearchResult]:
+        """按 URL 去重，保留首次出现的"""
+        seen = set()
+        unique = []
+        for r in results:
+            if r.url not in seen:
+                seen.add(r.url)
+                unique.append(r)
+        return unique
 
 
 # 全局搜索引擎实例
